@@ -1,3 +1,7 @@
+# Currently obsolete. Eventually, I want a script that can create 
+# the table directly on inferno so the code can use inferno's processor, 
+# not my local machine's
+
 from tableMaker import *
 path = r"../flameAICHE/run"
 Lvals = [0.00135, 0.002, 0.004, 0.006, 0.008, 0.02, 0.04, 0.2]
