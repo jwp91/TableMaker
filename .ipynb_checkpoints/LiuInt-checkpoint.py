@@ -18,30 +18,65 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1):
         low: lower bound for integration. Will be zero in most applications
         upp: upper bound for integration. Will be one in most applications
     """
-    #--------- βPDF parameters:
-    zero = ϵ #Parameter to avoid divide by zero errors
-    if ξm == 0:
-        ξm = ϵ
-    if ξv == 0:
-        ξv = ϵ
-    a = ξm*( ξm*(1-ξm)/ξv - 1 )
-    b = ( ξm*(1-ξm)/ξv - 1 )*(1-ξm)
-    if a == 0:
-        a = ϵ
-    if b == 0:
-        b = ϵ
-    
-    norm = gamma(a+b)/gamma(a)/gamma(b)   # Normalizes PDF to integrate to 1
-    
     #--------- Function to be integrated: ϕ(ξ)*P(ξ; ξm, ξv)
-    def ϕP(ξ):
+    def P(ξ, a, b):
         P = ξ**(a-1) * (1-ξ)**(b-1)       # βPDF, non-normalized
+        return P
+        
+    def ϕP(ξ, a, b):
         if(type(ϕ)==int):                 # Avoids casting error if ϕ(ξ) is constant
-            return ϕ*P
+            return ϕ*P(ξ, a, b)
         else:
-            return ϕ(ξ)*P
+            return ϕ(ξ)*P(ξ, a, b)
     
-    #--------- Correction for boundary singularity. Utilizes the fact that ϕ(0) and ϕ(1) are known at the endpoints.
+    #--------- βPDF parameters:
+    # Correct to avoid βPDF singularities
+    zero = 1e-8       #Future project: evaluate comparative computational cost vs. accuracy of reducing this threshold.
+    if ξm < zero:
+        ξm = zero
+    if ξm > 1-zero:
+        ξm = 1 - zero
+        
+    ξv_max = ξm*(1-ξm) 
+        # This is used to scale the adjusted ξv variables below to ξm 
+        # i.e. in the case that ξm==0 and ξv==0, ξv_max will be lower than the threshold set as "zero": zero*(1-zero) < zero, meaning ξv_max < ξv
+    if ξv < ξv_max*(1e-6):
+        ξv = ξv_max*(1e-6) 
+    if ξv > ξv_max*(1 - 1e-6):
+        ξv = ξv_max*(1 - 1e-6)
+    if ξv > ξv_max:
+        ξv = ξv_max*(1 - 1e-6)
+        print(f"""ξv_max exceeded. ξv_max = {ξv_max}, but ξv_inputted = {ξv}
+            Corrected: ξv = ξv_max*(1 - {zero:.1e}) = {ξv:.1e}""")
+        
+    # Calculate parameters
+    a = ( ξm*(1-ξm)/ξv - 1 )*ξm
+    b = ( ξm*(1-ξm)/ξv - 1 )*(1-ξm)
+
+    # Avoid βPDF singularities
+    if a <= zero:
+        a = zero
+    if b <= zero:
+        b = zero
+
+    # Handle very large a and b (Liu 767)
+    if a > 500 and a >= b:
+        # Limit value of a
+        fmax = 1/(1 + (b - 1)/(a - 1))
+        a = 500
+        b = (a - 1 - fmax*(a - 2))/fmax
+        norm = ϵ**a/a + quad(P, ϵ, 1-ϵ, args = (a, b))[0] + ϵ**b/b
+    elif b > 500 and b >= a:
+        # Limit value of b
+        fmax = 1/(1 + (b - 1)/(a - 1))
+        b = 500
+        a = (1 + fmax*(b - 2))/(1 - fmax)
+        norm = ϵ**a/a + quad(P, ϵ, 1-ϵ, args = (a, b))[0] + ϵ**b/b
+    else:
+        norm = gamma(a+b)/gamma(a)/gamma(b)   # Normalizes PDF to integrate to 1
+    
+
+    #--------- Correction for boundary singularity (Liu 767). Utilizes the fact that ϕ(0) and ϕ(1) are known at the endpoints.
     if(type(ϕ)==int):
         ϕ0 = ϕ
         ϕ1 = ϕ
@@ -50,9 +85,9 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1):
         ϕ1 = ϕ(1)
     
     #--------- BASE CODE
-    p1 = ϕ0*(ϵ**a)/a                     # 0 < ξ < ϵ
-    p2 = quad(ϕP, ϵ, 1-ϵ)[0]             # ϵ < ξ < 1-ϵ
-    p3 = ϕ1*(ϵ**b)/b                     # 1-ϵ < ξ < ϵ
+    p1 = ϕ0*(ϵ**a)/a                          # 0   < ξ < ϵ
+    p2 = quad(ϕP, ϵ, 1-ϵ, args = (a, b))[0]   # ϵ   < ξ < 1-ϵ
+    p3 = ϕ1*(ϵ**b)/b                          # 1-ϵ < ξ < ϵ
     
     #--------- Conditionals to handle instances where bounds are not (0,1)
     if low == 0:
@@ -62,7 +97,7 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1):
             p1 = p1*(upp/ϵ)
             p2, p3 = 0, 0
         elif ϵ < upp < 1-ϵ:
-            p2 = quad(ϕP, ϵ, upp)[0]
+            p2 = quad(ϕP, ϵ, upp, args = (a, b))[0]
             p3 = 0
         elif upp < 1:
             p3 = p3*(upp-(1-ϵ))/ϵ
@@ -74,7 +109,7 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1):
         else:
             p1 = p1*(ϵ-low)/ϵ
             if ϵ < upp < 1-ϵ:
-                p2 = quad(ϕP, ϵ, upp)[0]
+                p2 = quad(ϕP, ϵ, upp, args = (a, b))[0]
                 p3 = 0
             elif upp < 1:
                 p3 = p3*(upp-(1-ϵ))/ϵ
@@ -82,18 +117,29 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1):
     elif ϵ < low < 1-ϵ:
         p1 = 0
         if ϵ < upp < 1-ϵ:
-            p2 = quad(ϕP, low, upp)[0]
+            p2 = quad(ϕP, low, upp, args = (a, b))[0]
             p3 = 0
         else:
-            p2 = quad(ϕP, low, 1-ϵ)[0]
+            p2 = quad(ϕP, low, 1-ϵ, args = (a, b))[0]
             if upp < 1:
                 p3 = p3*(upp-(1-ϵ))/ϵ
                 #If upp == 1, p3 is already accurate
     else:
         p1, p2 = 0,0
         p3 = p3*(upp-low)/ϵ
-    
-    return (p1+p3+p2)*norm               # Normalizes the βPDF integration before returning.
+
+    # DEBUGGING
+    if np.isnan(p1) or np.isnan(p2) or np.isnan(p3) or np.isnan(norm):
+        print("ERROR: returned value is nan. Details:")
+        print(f"p1 = {p1}, p2 = {p2}, p3 = {p3}")
+        print(f"xim = {ξm}, xiv = {ξv}, a = {a}, b = {b}")
+        print(f"norm = {norm}")
+    if np.isnan((p1+p2+p3)*norm):
+        print("ERROR: returned value is nan. Details:")
+        print(f"p1 = {p1}, p2 = {p2}, p3 = {p3}")
+        print(f"xim = {ξm}, xiv = {ξv}, a = {a}, b = {b}")
+        print(f"norm = {norm}")
+    return (p1+p2+p3)*norm        # Normalizes the βPDF integration before returning.
 
 def βPdf(ξ, ξm, ξv, ϵ = 1e-6):
     """
@@ -110,9 +156,9 @@ def βPdf(ξ, ξm, ξv, ϵ = 1e-6):
     """
     zero = ϵ #Parameter to avoid divide by zero errors
     if ξm == 0:
-        ξm = 1e-6
+        ξm = ϵ
     if ξv == 0:
-        ξv = 1e-6
+        ξv = ϵ
     a = ξm*( ξm*(1-ξm)/ξv - 1 )
     b = ( ξm*(1-ξm)/ξv - 1 )*(1-ξm)
     
