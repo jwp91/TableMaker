@@ -18,46 +18,47 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1):
         low: lower bound for integration. Will be zero in most applications
         upp: upper bound for integration. Will be one in most applications
     """
+    if(type(ϕ)==int):
+        return ϕ              # Avoids casting error if ϕ(ξ) is a constant
     #--------- Function to be integrated: ϕ(ξ)*P(ξ; ξm, ξv)
     def P(ξ, a, b):
         P = ξ**(a-1) * (1-ξ)**(b-1)       # βPDF, non-normalized
         return P
         
     def ϕP(ξ, a, b):
-        if(type(ϕ)==int):                 # Avoids casting error if ϕ(ξ) is constant
-            return ϕ*P(ξ, a, b)
-        else:
-            return ϕ(ξ)*P(ξ, a, b)
+        return ϕ(ξ)*P(ξ, a, b)
     
     #--------- βPDF parameters:
-    # Correct to avoid βPDF singularities
-    zero = 1e-8       #Future project: evaluate comparative computational cost vs. accuracy of reducing this threshold.
-    if ξm < zero:
-        ξm = zero
-    if ξm > 1-zero:
-        ξm = 1 - zero
-        
-    ξv_max = ξm*(1-ξm) 
-        # This is used to scale the adjusted ξv variables below to ξm 
-        # i.e. in the case that ξm==0 and ξv==0, ξv_max will be lower than the threshold set as "zero": zero*(1-zero) < zero, meaning ξv_max < ξv
-    if ξv < ξv_max*(1e-6):
-        ξv = ξv_max*(1e-6) 
-    if ξv > ξv_max*(1 - 1e-6):
-        ξv = ξv_max*(1 - 1e-6)
-    if ξv > ξv_max:
-        ξv = ξv_max*(1 - 1e-6)
-        print(f"""ξv_max exceeded. ξv_max = {ξv_max}, but ξv_inputted = {ξv}
-            Corrected: ξv = ξv_max*(1 - {zero:.1e}) = {ξv:.1e}""")
+    #Note: if ξm is numerically zero or one, the variance must be zero:
+    if ξm == 0 and ξv != 0:
+        ξv = 0
+        print(f"LiuInt Error: ξv must be zero because ξm==0. ξv inputted = {ξv}")
+    if ξm == 1 and ξv != 0:
+        ξv = 0
+        print(f"LiuInt Error: ξv must be zero because ξm==1. ξv inputted = {ξv}")
+
+    #Treating ξv boundary conditions:
+    if ξv == 0:
+        return ϕ(ξm)
+
+    ξv_max = ξm*(1-ξm)
+    if ξv == ξv_max:
+        return (1-ξm)*ϕ(0) + ξm*ϕ(1) 
+        #This can be derived knowing that with max variance, the PDF becomes
+        #2 delta functions whose height are proportional to the mean mixture fraction. 
         
     # Calculate parameters
     a = ( ξm*(1-ξm)/ξv - 1 )*ξm
     b = ( ξm*(1-ξm)/ξv - 1 )*(1-ξm)
 
-    # Avoid βPDF singularities
+    # Avoid βPDF singularities. This block shouldn't execute, hence the print statements for debugging. 
+    zero = 1e-8
     if a <= zero:
         a = zero
+        print(f"LiuInt Warning: 'a' computed to be zero. Corrected to {zero}")
     if b <= zero:
         b = zero
+        print(f"LiuInt Warning: 'b' computed to be zero. Corrected to {zero}")
 
     # Handle very large a and b (Liu 767)
     if a > 500 and a >= b:
@@ -77,12 +78,8 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1):
     
 
     #--------- Correction for boundary singularity (Liu 767). Utilizes the fact that ϕ(0) and ϕ(1) are known at the endpoints.
-    if(type(ϕ)==int):
-        ϕ0 = ϕ
-        ϕ1 = ϕ
-    else:
-        ϕ0 = ϕ(0)
-        ϕ1 = ϕ(1)
+    ϕ0 = ϕ(0)
+    ϕ1 = ϕ(1)
     
     #--------- BASE CODE
     p1 = ϕ0*(ϵ**a)/a                          # 0   < ξ < ϵ
