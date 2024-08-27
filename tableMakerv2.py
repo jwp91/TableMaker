@@ -6,7 +6,7 @@ import os
 from glob import glob
 from re import match, search
 from statistics import variance
-import LiuInt as LI #Package with functions for integrating over the BPDF, parameterized by xi_avg and xi_variance
+import LiuInt as LI # Package with functions for integrating over the BPDF, parameterized by xi_avg and xi_variance
 from scipy.interpolate import RegularGridInterpolator as rgi
 
 ##############################
@@ -25,18 +25,26 @@ def computeProgressVariable(data, header, c_components = ['H2', 'H2O', 'CO', 'CO
             The strings in the list should each match a string used in 'header'
     """
     #---------- Determine where the c_components are in 'data'
-    indices = np.empty(len(c_components), dtype = np.int8)
-    for i in range(len(header)):              #For each element in the header, 
-        for y in range(len(c_components)):      #Check for a match among the passed-in c_components
+    indices = np.ones(len(c_components), dtype = np.int8)*-1
+    for i in range(len(header)):                # For each element in the header, 
+        for y in range(len(c_components)):      # Check for a match among the passed-in c_components
             if header[i]==c_components[y].replace(" ",""):
-                indices[y] = int(i)           #Indices must be strictly integers (ex. 5, not 5.0)
+                indices[y] = int(i)             # Indices must be strictly integers (ex. 5, not 5.0)
+                
+    # Confirm all indices were located
+    allFound = True
+    for j, ind in enumerate(indices):
+        if ind == -1:
+            allFound = False
+            raise ValueError(f"No match found for {c_components[j]}.")
+            return None
 
     #---------- Compute progress variable
-    c = np.zeros(len(data[0]))                #Initialize c array
-    for d in range(len(data[0])):             #For each set of data points (each column),
+    c = np.zeros(len(data[0]))        # Initialize c array
+    for d in range(len(data[0])):     # For each set of data points (each column),
         sum = 0
-        for index in indices:
-            sum += data[index,d]              #Sum the mole fractions of each component
+        for index in indices:         # For each of the components specified, 
+            sum += data[index,d]      # Sum the mole fractions of each component
         c[d] = sum
     return c 
 
@@ -52,7 +60,7 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         Each file will have been run under an array of conditions L,t:
         Lvals: values of parameter L used, formatted as a list (ex. [ 0.002, 0.02, 0.2])
         tvals: values of parameter t used, formatted as a list (ex. [ 0    , 1   , 2  ])
-        file_pattern = regular expression (regex) to identify which files in the target folder are data files. 
+        file_pattern = regular expression (regex) to identify which files in the target folder are data files.  
             DEFAULT: r'^L.*.dat$'. This grabs any files that begin with "L" and end with ".dat". 
         c_components = list defining whih components' mixture fractions are included in the progress variable. 
             By default, this is set to be ['H2', 'H2O', 'CO', 'CO2']
@@ -81,9 +89,9 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
             data_files= np.append(data_files, file)
 
     #---------- Initialize data arrays
-    all_data = np.empty((len(Lvals),len(tvals)), dtype=np.ndarray)    #initialize to grab data values
-    headers  = np.empty((len(Lvals),len(tvals)), dtype=np.ndarray)    #Initialize to store headers
-    extras   = np.empty((len(Lvals),len(tvals)), dtype=np.ndarray)    #initialize to store extra info before header
+    all_data = np.empty(( len(Lvals), len(tvals) ), dtype=np.ndarray)    # Initialize to grab data values
+    headers  = np.empty(( len(Lvals), len(tvals) ), dtype=np.ndarray)    # Initialize to store headers
+    extras   = np.empty(( len(Lvals), len(tvals) ), dtype=np.ndarray)    # Initialize to store extra info before header
 
     #---------- Grab and store data
     for i in range(len(data_files)):
@@ -92,6 +100,13 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         
         file = data_files[i]
         with open(file, 'r') as f:
+            #---------- Make sure the assigned L and t value are in the file name:
+            if str(Lvals[l]) not in f.name:
+                print(f"Warning: for file name '{f.name}', mismatch: L = {Lvals[l]}")
+            if str(tvals[t]) not in f.name:
+                print(f"Warning: for file name '{f.name}', mismatch: t = {tvals[t]}")
+
+            #---------- Get raw data
             lines = f.readlines()
             raw_data = np.array([line.strip() for line in lines if not line.startswith('#')])
 
@@ -116,15 +131,14 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         extras[l,t]  = extra
         
         #---------- Parse out numerical values
-        #NOTE: the following lines could be achieved with np.loadtxt(). This would require writing a modified file that only
-        #      had the data and headers, then reading it back in. Because we've already read in the lines to extract the headers, 
-        #      we can extract the data manually with a few extra lines of code.
+        #NOTE: the following lines could be achieved with np.loadtxt(). Because we've already read in the lines
+        #      to extract the headers, we can extract the data manually with a few extra lines of code.
         
-        file_data = np.empty(len(raw_data[0].split()))     #Holds the data for this file
+        file_data = np.empty(len(raw_data[0].split()))     # Holds the data for this file
         for row in raw_data:
             numbers = np.array([float(val) for val in row.split()])
-            file_data = np.vstack((file_data,numbers)) #Adds each new row of data as a new row in file_data
-        file_data = file_data[1:file_data.size]        #Get rid of first column (which is empty and only used for initialization)
+            file_data = np.vstack((file_data,numbers))     # Adds each new row of data as a new row in file_data
+        file_data = file_data[1:file_data.size]            # Get rid of first column (which is empty and only used for initialization)
 
         #---------- Transpose data so that each row contains data for a certain property (ex. one row is temperature data, one is density, etc.)
         transposed_file_data = file_data.T
@@ -150,8 +164,7 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
 
 ##############################
 
-def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
-             phi = 'T', Lt = False, mix_frac_name = "mixf", interpKind = 'cubic', get_data_files_output = None):
+def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'], phi = 'T', Lt = False, mix_frac_name = "mixf", interpKind = 'cubic', get_data_files_output = None):
     """
     Returns an array of interpolated functions phi(ξ) where phi is any property of the flame.
     Inputs:
@@ -165,11 +178,11 @@ def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
             DEFAULT: r'^L.*.dat$'. This grabs any files that begin with "L" and end with ".dat". 
         c_components = list defining which components' mixture fractions are included in the progress variable. 
             By default, this is set to be ['H2', 'H2O', 'CO', 'CO2']
-        phi = desired property (ex. 'T', 'rho', etc.). Default = 'T'
+        phi = desired property (ex. 'T', 'rho', etc.), case sensitive. Default = 'T'
             Available phi are viewable using "get_data_files(params)[1]".
-            NOTE: c (progress variable) is available in the data. Currently, c ≡ y_CO2 + y_CO + y_H2O + yH2. This definition can be changed
-                  by modifying the "computeProgressVariable" function. 
-        Lt = Tuple with values of L and t. If set to false (default), the output will be an array of the functions phi(ξ) for all datafiles. 
+            NOTE: c (progress variable) is available in the data. By default, c ≡ y_CO2 + y_CO + y_H2O + yH2. 
+            This definition can be changed by modifying the c_components parameter.
+        Lt = Tuple with values of L and t. If set to False (default), the output will be an array of the functions phi(ξ) for all datafiles. 
              Otherwise, this parameter determines which specific file should be used. 
              Example1: phiFuncs(path, phi = 'T', Lt = (0,1)): returns the interpolated T(ξ) function ONLY from the data in the file from Lvals[0], tvals[1]. 
              Example2: phiFuncs(path, phi = 'T'): returns an array containing the interpolated T(ξ) functions from every file in the directory
@@ -186,17 +199,19 @@ def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
     """
     #---------- Import data, files, and headers
     if get_data_files_output == None:
+        # No processed data passed in: must generate.
         data, headers, extras = get_data_files(path_to_flame_data, Lvals, tvals, file_pattern = file_pattern, c_components = c_components)
     else:
+        # Use pre-processed data
         data, headers, extras = get_data_files_output
     
     #---------- Get list of available phi (list of all data headers from original files)
     if type(Lt) == bool:
-        #User did not specify a specific file.
-        #This code here assumes that all datafiles have the same column labels and ordering:
+        # User did not specify a specific file.
+        # This code here assumes that all datafiles have the same column labels and ordering:
         phis = headers[0][0] 
     elif Lt[0] < len(headers) and Lt[1] < len(headers[0]):
-        #user specified a file and the indices were valid.
+        # User specified a file and the indices were valid.
         phis = headers[Lt[0]][Lt[1]]
     else:
         # User specified a file and the indices were invalid.
@@ -250,8 +265,7 @@ def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
 
 ##############################
     
-def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
-                    phi = 'T', interpKind = 'cubic', numXim:type(1)=5, numXiv:type(1) = 5, get_data_files_output = None):
+def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'], phi = 'T', interpKind = 'cubic', numXim:type(1)=5, numXiv:type(1) = 5, get_data_files_output = None):
     """
     Creates a 4D lookup table of phi_avg data. Axis are ξm, ξv, L (length scale), and t (time scale). 
     Inputs:
@@ -265,106 +279,79 @@ def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$
             DEFAULT: r'^L.*.dat$'. This grabs any files that begin with "L" and end with ".dat". 
         c_components = list defining which components' mixture fractions are included in the progress variable. 
             By default, this is set to be ['H2', 'H2O', 'CO', 'CO2']
-        phi = property for which values will be tabulated (ex. 'T', 'rho', etc.). Default = 'T'
+        phi = property for which values will be tabulated (ex. 'T', 'rho', etc.), case sensitive. Default = 'T'
             Available phi are viewable using "get_data_files(params)[1]".
-            NOTE: c (progress variable) is available in the data. Currently, c ≡ y_CO2 + y_CO + y_H2O + yH2. This definition can be changed
-                  by modifying the "computeProgressVariable" function.
+            NOTE: c (progress variable) is available in the data. By default, c ≡ y_CO2 + y_CO + y_H2O + yH2. 
+            This definition can be changed by modifying the c_components parameter.
         interpKind = specifies the method of interpolation that should be used (uses scipy.interp1d). Default = 'cubic'. 
         numXim, numXiv: Number of data points between bounds for ξm and ξv, respectively. Default value: 5
         get_data_files_output = used to save time in the event that multiple tables are to be constructed. 
             This should be the output of get_data_files, run with the relevant parameters matching those passed in to this function.
     """
     if get_data_files_output == None:
-        funcs = phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = file_pattern, c_components = c_components, 
-                        phi = phi, interpKind = interpKind, get_data_files_output = get_data_files_output)
+        # No processed data passed in: must generate.
+        funcs = phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = file_pattern, c_components = c_components, phi = phi, interpKind = interpKind, get_data_files_output = get_data_files_output)
     else:
-        funcs = phiFuncs(None, Lvals, tvals, file_pattern = file_pattern, c_components = c_components, phi = phi,
-                         get_data_files_output = get_data_files_output) 
+        # Use pre-processed data
+        funcs = phiFuncs(None, Lvals, tvals, file_pattern = file_pattern, c_components = c_components, phi = phi, interpKind = interpKind, get_data_files_output = get_data_files_output) 
 
     #---------- Create arrays of ξm and ξv
     Xims = np.linspace(0,1,numXim)      #Xim = Mean mixture fraction.
-    Xivs = np.zeros((len(Xims),numXiv)) #Xiv = Mixture fraction variance. Maximum valid Xiv depends on Xim, so this must be a 2D array.
-    for i in range(len(Xivs)):
-        Xivs[i] = np.linspace(0, Xims[i]*(1-Xims[i]), numXiv)  # Xiv_max = Xim*(1-Xim)
+    Xivs = np.linspace(0,1,numXiv)      #Xiv = Mixture fraction variance. Maximum valid Xiv depends on Xim, so we normalize the values to the maximum
     
     #----------- Table Creation
     table = np.full((numXim, numXiv, len(Lvals), len(tvals)), -1.0)
     for m in range(len(Xims)):                                               #Loop over each value of ξm
         xim = Xims[m]
-        for v in range(len(Xivs[m])):                                        #Loop over each value of ξv
-            xiv = Xivs[m][v]
+        for v in range(len(Xivs)):                                           #Loop over each value of ξv
+            xivMax = xim*(1-xim)
+            xiv = Xivs[v]*xivMax
             for l in range(len(Lvals)):
                 for t in range(len(tvals)):
-                    phiAvg = LI.IntegrateForPhiBar(xim, xiv, funcs[l][t])    #Calculates phi__Avg
+                    phiAvg = LI.IntegrateForPhiBar(xim, xiv, funcs[l][t])    #Calculates phi_Avg
                     table[m,v,l,t] = phiAvg                                  #FINAL INDEXING: table[m,v,l,t]
 
                             
     #Returns: table itself, then an array of the values of Xims, Xivs, Lvals, and tvals for indexing the table.
-    #Ex. table[1][2][3][4] corresponds to Xim = Xims[1], Xiv = Xivs[1][2], L = Lvals[3], t = tvals[4].
-    #    Note: because each Xim has a different set of corresponding Xivs, Xivs is 2D
+    #Ex. table[7][6][5][4] corresponds to Xim = indices[0][7], Xiv = indices[1][6], L = indices[2][5], t = indices[3][4].
+    #Note: Xiv is normalized to the maximum. For table[1][2][3][4], the actual value of the variance would be indices[1][6]*Xivmax,
+    #      where Xivmax = Xim*(1-Xim) =  indices[0][7]*(1-indices[0][7])
+    
     indices = [Xims, Xivs, Lvals, tvals]
     return table, indices
 
 ##############################
 
-#Because Xiv vs. Xim is not square, we have to interpolate using indices.
 def createInterpolator(data, inds, method = 'cubic'):
     """
-    Creates an interpolator using RegularGridInterpolator.
+    Creates an interpolator using RegularGridInterpolator (rgi).
     Inputs:
         data, inds =  table and indices created by makeLookupTable
         method = interpolation method that RegularGridInterpolator should use. Default = 'cubic'
     The returned function is called with func(xim, xiv, L, t)
     """
     xi_means = inds[0]
-    xi_vars = inds[1] #2D array. xi_vars[i] has xiv values for xi_means[i]
+    xi_vars = inds[1] #Normalized to Xivmax
     Ls = inds[2]
     ts = inds[3]
-    
-    xi_mean_indices = range(len(xi_means))
-    xi_var_indices = range(len(xi_vars[0])) #each row has the same # of xivs
-    # NOTE: Because each value of ximean has a different set of xivars, 
-    # we interpolate by index. We do the same with xi_mean itself for clarity.
-    Ls_indices = range(len(Ls))
-    ts_indices = range(len(ts))
 
-    interpolator = rgi((xi_mean_indices, xi_var_indices, Ls_indices, ts_indices), data, method = 'cubic')
-
-    def translate(xim, xiv, L, t):
-        """
-        Translates xim, xiv, L, and t values to their respective indices, 
-        which are then used in the interpolator. 
-        """
-        xim_ind = interp1d(xi_means, xi_mean_indices, kind = 'linear')(xim)
-
-        #xi_vars is 2D. xi_means[i] has the corresponding 
-        #variances xi_vars[i]. Thus:
-        interp = rgi((xi_mean_indices, xi_var_indices), xi_vars)
-        def solve(index):
-            xiIndMin = min(xi_var_indices)
-            xiIndMax = max(xi_var_indices)
-            buffer = 1e-8
-            if index < xiIndMin:
-                index = xiIndMin + buffer
-            if index > xiIndMax:
-                index = xiIndMax - buffer
-            return interp((xim_ind, index)) - xiv
-        ig = 0.01 #initial guess for xiv index
-        xiv_ind = np.array(least_squares(solve, ig, bounds = [min(xi_var_indices), max(xi_var_indices)]).x)[0]
-        L_ind = interp1d(Ls, Ls_indices, kind = 'linear')(L)
-        t_ind = interp1d(ts, ts_indices, kind = 'linear')(t)
-            #Using cubic interpolators here might be better if the length and time scales had more regular spacing. 
-            #If there are large gaps, a cubic interpolator can return out-of-bounds values when interpolating
-        
-        return (xim_ind, xiv_ind, L_ind, t_ind)
+    interpolator = rgi((xi_means, xi_vars, Ls, ts), data, method = method)
 
     def func(xim, xiv, L, t):
+        # Function returned to the user.
         """
-        Function returned to the user. 
-        Accepts values of Xi_mean, Xi_variance, length, and time scale. 
+        Interpolates for a value of phi given:
+            Xi_mean
+            Xi_variance (actual value)
+            Length scale
+            Time scale
         """
-        xim_ind, xiv_ind, L_ind, t_ind = translate(xim, xiv, L, t)
-        return interpolator((xim_ind, xiv_ind, L_ind, t_ind))
+        xivMax = xim*(1-xim)
+        if xiv > xivMax:
+            raise ValueError(f"xiv must be less than xivMax. With xim = {xim}, xivMax = {xivMax}.")
+            return None
+        xivScaled = xiv/xivMax
+        return interpolator((xim, xivScaled, L, t))
     
     return func
 
@@ -373,24 +360,24 @@ def createInterpolator(data, inds, method = 'cubic'):
 def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, hc_avg = 10**5):
     """
     Solves for L,t given:
-        h:   value of enthalpy
-        c:   value of progress variable
-        xim: mean mixture fraction
-        xiv: mixture fraction variance
-        hInterp: interpolated function for h(xim, xiv, L, t)
-        cInterp: interpolated function for c(xim, xiv, L, t)
-            - Both of these functions can be created using "createInterpolator"
-        Lbounds: tuple with minimum and maximum value of L
-        tbounds: tuple with minimum and maximum value of L
-        hc_avg: used to correct error differences. Because values of h are so low, 
-                the residual will be multiplied by this scalar to bring the residual 
-                for h and c to similar scales. In theory, the ideal value for this 
-                parameter would be h(avg)/c(avg) for the given domain.
+              h: value of enthalpy
+              c: value of progress variable
+            xim: mean mixture fraction
+            xiv: mixture fraction variance
+        hInterp: interpolated function for h(xim, xiv, L, t), created using "createInterpolator"
+        cInterp: interpolated function for c(xim, xiv, L, t), created using "createInterpolator"
+        Lbounds: tuple containing the minimum and maximum value of L
+        tbounds: tuple contianing the minimum and maximum value of L
+         hc_avg: used to correct error differences. Because values of h are so low, 
+                 the residual will be multiplied by this scalar to bring the residual 
+                 for h and c to similar scales. In theory, the ideal value for this 
+                 parameter would be h(avg)/c(avg) for the given domain.
             
     Returns a tuple of form (L,t)
     This function is to be used for getting values of phi by phi(xim, xiv, [L,t](h,c))
     """
     def solve(Lt):
+        # Not currently using this. This was used for an fsolve formulation, but this doesn't work (see below)
         L = Lt[0]
         t = Lt[1]
 
@@ -406,7 +393,7 @@ def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, hc_avg = 10**5):
             t = tbounds[1] - buffer
         #print("L,t = ", L,t)                    DEBUGGING
         
-        resid1 = (hInterp(xim, xiv, L, t) - h)*hc_avg #h values are typically low, we have to inflate this error
+        resid1 = (hInterp(xim, xiv, L, t) - h)*hc_avg #h values are typically much lower than c values, so we inflate this error
         resid2 = cInterp(xim, xiv, L, t) - c
         #print("resids = ", resid1, resid2)      DEBUGGING
         return [resid1, resid2]
@@ -421,3 +408,76 @@ def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, hc_avg = 10**5):
     #ridder(solve, lowBounds, highBounds) DOESN'T WORK: ridder can't accept vector functions
     #fsol = fsolve(solve, ig). Doesn't respect the bounds for some reason. 
     return leastSq.x
+
+def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
+             phi = 'T', interpKind = 'cubic', numXim:type(1)=5, numXiv:type(1) = 5, get_data_files_output = None):
+    """
+    Creates a table of phi values in terms of Xim, Xiv, L, t
+    Inputs:
+        path_to_flame_data = path to simulation data relative to the current folder. 
+            NOTE: The data headers must be the last commented line before the data begins.
+            The code found at https://github.com/BYUignite/flame was used in testing. 
+        Each file will have been run under an array of conditions L,t:
+        Lvals: values of parameter L used, formatted as a list (ex. [ 0.002, 0.02, 0.2])
+        tvals: values of parameter t used, formatted as a list (ex. [ 0    , 1   , 2  ])
+        file_pattern = regular expression (regex) to identify which files in the target folder are data files. 
+            DEFAULT: r'^L.*.dat$'. This grabs any files that begin with "L" and end with ".dat". 
+        c_components = list defining which components' mixture fractions are included in the progress variable. 
+            By default, this is set to be ['H2', 'H2O', 'CO', 'CO2']
+        phi = single property or list of properties for which values will be tabulated (ex. 'T', 'rho', etc.), case sensitive. Default = 'T'
+            Available phi are viewable using "get_data_files(params)[1]".
+            NOTE: c (progress variable) is available in the data. By default, c ≡ y_CO2 + y_CO + y_H2O + yH2.
+            This definition can be changed by modifying the c_components parameter.
+        interpKind = specifies the method of interpolation that should be used (uses scipy.interp1d and RegularGridInterpolator). Default = 'cubic'. 
+        numXim, numXiv: Number of data points between bounds for ξm and ξv, respectively. Default value: 5
+        get_data_files_output = used to save time in the event that multiple tables are to be constructed. 
+            This should be the output of get_data_files, run with the relevant parameters matching those passed in to this function.
+    """
+    # Confirm h and c aren't in phi
+    for p in phi:
+        if p=='h' or p=='c':
+            print("'h' and 'c' are used as table axis and so cannot be used as phi. Cancelling operation.")
+            return None
+    if type(phi) == type('str'):
+        phi = [phi,]
+
+    # Retrieve data, create h and c tables
+    if get_data_files_output == None:
+        # No processed data passed in: must generate.
+        data_output = get_data_files(path_to_flame_data, Lvals, tvals, file_pattern = file_pattern, c_components = c_components)
+    else:
+        # Use pre-processed data
+        data_output = get_data_files_output
+
+    # Create h & c tables
+    h_table, h_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='h',
+                                         numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, 
+                                         c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+    c_table, c_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='c',
+                                         numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, 
+                                         c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+
+    # Create h & c interpolators
+    Ih = createInterpolator(h_table, h_indices, method = interpKind)
+    Ic = createInterpolator(c_table, c_indices, method = interpKind)
+
+    # Create array containing phi tables
+    phiTables = []
+    for p in phi:
+        # Get base table with phi data
+        table, indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi = p, 
+                                         numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, 
+                                         c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+
+        # Create interpolator
+        InterpPhi = createInterpolator(table, indices, method = interpKind)
+        # Create function phi(xim, xiv, h, c)
+        Lbounds = [min(Lvals), max(Lvals)]
+        tbounds = [min(tvals), max(tvals)]
+        def phi_table(xim, xiv, h, c):
+            # Invert from (h, c) to (L, t)
+            L, t = Lt_hc(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, hc_avg = 10**(-5))
+            return InterpPhi(xim, xiv, L, t)
+
+        phiTables.append(phi_table)      
+    return phiTables
