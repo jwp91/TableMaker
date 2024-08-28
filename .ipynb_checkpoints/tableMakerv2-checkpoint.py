@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.integrate import quad
-from scipy.optimize import fsolve, ridder, least_squares
+from scipy.optimize import fsolve, ridder, least_squares, root
 import os
 from glob import glob
 from re import match, search
@@ -89,9 +89,9 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
             data_files= np.append(data_files, file)
 
     #---------- Initialize data arrays
-    all_data = np.empty(( len(Lvals), len(tvals) ), dtype=np.ndarray)    # Initialize to grab data values
-    headers  = np.empty(( len(Lvals), len(tvals) ), dtype=np.ndarray)    # Initialize to store headers
-    extras   = np.empty(( len(Lvals), len(tvals) ), dtype=np.ndarray)    # Initialize to store extra info before header
+    all_data = np.empty((len(Lvals),len(tvals)), dtype=np.ndarray)  # Initialize to grab data values
+    headers  = np.empty((len(Lvals),len(tvals)), dtype=np.ndarray)  # Initialize to store headers
+    extras   = np.empty((len(Lvals),len(tvals)), dtype=np.ndarray)  # Initialize to store extra info before header
 
     #---------- Grab and store data
     for i in range(len(data_files)):
@@ -321,7 +321,6 @@ def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$
     return table, indices
 
 ##############################
-
 def createInterpolator(data, inds, method = 'cubic'):
     """
     Creates an interpolator using RegularGridInterpolator (rgi).
@@ -335,7 +334,29 @@ def createInterpolator(data, inds, method = 'cubic'):
     Ls = inds[2]
     ts = inds[3]
 
-    interpolator = rgi((xi_means, xi_vars, Ls, ts), data, method = method)
+    Ls_indices = range(len(Ls))
+    interpolator = rgi((xi_means, xi_vars, Ls_indices, ts), data, method = method)
+
+    def translate(xim, xiv, L, t):
+        """
+        Translates xim, xiv, L, and t values to the forms used by the interpolator:
+            xim -> xim (no translation)
+            xiv -> xiv_norm (normalized to maximum)
+            L -> L_ind (linear indices)
+            t -> t     (no translation)
+        """
+        
+        xiv_max = xim*(1-xim)
+        if xiv > xiv_max:
+            raise ValueError(f"xiv must be less than xivMax. With xim = {xim}, xiv_max = {xiv_max}.")
+            return None
+        xiv_norm = xiv/xiv_max
+        
+        L_ind = interp1d(Ls, Ls_indices, kind = 'linear')(L)
+        #Using cubic interpolators here might be better if the length and time scales had more regular spacing. 
+        #If there are large gaps, a cubic interpolator can return out-of-bounds values when interpolating
+
+        return (xim, xiv_norm, L_ind, t)
 
     def func(xim, xiv, L, t):
         # Function returned to the user.
@@ -346,18 +367,13 @@ def createInterpolator(data, inds, method = 'cubic'):
             Length scale
             Time scale
         """
-        xivMax = xim*(1-xim)
-        if xiv > xivMax:
-            raise ValueError(f"xiv must be less than xivMax. With xim = {xim}, xivMax = {xivMax}.")
-            return None
-        xivScaled = xiv/xivMax
-        return interpolator((xim, xivScaled, L, t))
+        return interpolator(translate(xim, xiv, L, t))
     
     return func
-
+    
 ##############################
 
-def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, hc_avg = 10**5):
+def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
     """
     Solves for L,t given:
               h: value of enthalpy
@@ -368,34 +384,35 @@ def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, hc_avg = 10**5):
         cInterp: interpolated function for c(xim, xiv, L, t), created using "createInterpolator"
         Lbounds: tuple containing the minimum and maximum value of L
         tbounds: tuple contianing the minimum and maximum value of L
-         hc_avg: used to correct error differences. Because values of h are so low, 
-                 the residual will be multiplied by this scalar to bring the residual 
-                 for h and c to similar scales. In theory, the ideal value for this 
-                 parameter would be h(avg)/c(avg) for the given domain.
+        norm   := np.max(h_table)/np.max(c_table). Compensates for the large difference in magnitude between typical h and c values.
             
     Returns a tuple of form (L,t)
     This function is to be used for getting values of phi by phi(xim, xiv, [L,t](h,c))
     """
     def solve(Lt):
-        # Not currently using this. This was used for an fsolve formulation, but this doesn't work (see below)
         L = Lt[0]
         t = Lt[1]
 
         #----------- Ensure value is within interpolator's bounds
         buffer = 1e-8
+        penalty = (1e10, 1e10)
         if L < Lbounds[0]:
+            return penalty
             L = Lbounds[0] + buffer
         if L > Lbounds[1]:
+            return penalty
             L = Lbounds[1] - buffer
         if t < tbounds[0]:
+            return penalty
             t = tbounds[0] + buffer
         if t > tbounds[1]:
             t = tbounds[1] - buffer
-        #print("L,t = ", L,t)                    DEBUGGING
-        
-        resid1 = (hInterp(xim, xiv, L, t) - h)*hc_avg #h values are typically much lower than c values, so we inflate this error
-        resid2 = cInterp(xim, xiv, L, t) - c
-        #print("resids = ", resid1, resid2)      DEBUGGING
+            return penalty
+        #print("L,t = ", L,t)                    #DEBUGGING
+
+        # Calculate residuals
+        resid1 = hInterp(xim, xiv, L, t) - h
+        resid2 = (cInterp(xim, xiv, L, t) - c)*norm
         return [resid1, resid2]
     
     #----------- Solve function
@@ -404,10 +421,9 @@ def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, hc_avg = 10**5):
     ig   = (Lavg, tavg)
     lowBounds = [Lbounds[0], tbounds[0]]
     highBounds = [Lbounds[1], tbounds[1]]
-    leastSq = least_squares(solve, ig, bounds = (lowBounds, highBounds))
-    #ridder(solve, lowBounds, highBounds) DOESN'T WORK: ridder can't accept vector functions
-    #fsol = fsolve(solve, ig). Doesn't respect the bounds for some reason. 
-    return leastSq.x
+    zero = least_squares(solve, ig, bounds = (lowBounds, highBounds)).x
+    print("resids = ", solve(zero))      #DEBUGGING
+    return zero
 
 def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
              phi = 'T', interpKind = 'cubic', numXim:type(1)=5, numXiv:type(1) = 5, get_data_files_output = None):
@@ -438,10 +454,12 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         if p=='h' or p=='c':
             print("'h' and 'c' are used as table axis and so cannot be used as phi. Cancelling operation.")
             return None
+
+    # Ensure array-like
     if type(phi) == type('str'):
         phi = [phi,]
 
-    # Retrieve data, create h and c tables
+    # Retrieve data
     if get_data_files_output == None:
         # No processed data passed in: must generate.
         data_output = get_data_files(path_to_flame_data, Lvals, tvals, file_pattern = file_pattern, c_components = c_components)
@@ -451,13 +469,12 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
 
     # Create h & c tables
     h_table, h_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='h',
-                                         numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, 
-                                         c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+                                         numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
     c_table, c_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='c',
-                                         numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, 
-                                         c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+                                         numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
 
     # Create h & c interpolators
+    norm = np.max(h_table)/np.max(c_table)
     Ih = createInterpolator(h_table, h_indices, method = interpKind)
     Ic = createInterpolator(c_table, c_indices, method = interpKind)
 
@@ -466,8 +483,7 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
     for p in phi:
         # Get base table with phi data
         table, indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi = p, 
-                                         numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, 
-                                         c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+                                         numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
 
         # Create interpolator
         InterpPhi = createInterpolator(table, indices, method = interpKind)
@@ -476,7 +492,7 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         tbounds = [min(tvals), max(tvals)]
         def phi_table(xim, xiv, h, c):
             # Invert from (h, c) to (L, t)
-            L, t = Lt_hc(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, hc_avg = 10**(-5))
+            L, t = Lt_hc(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm)
             return InterpPhi(xim, xiv, L, t)
 
         phiTables.append(phi_table)      

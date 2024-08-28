@@ -31,6 +31,14 @@ def computeProgressVariable(data, header, c_components = ['H2', 'H2O', 'CO', 'CO
             if header[i]==c_components[y].replace(" ",""):
                 indices[y] = int(i)           #Indices must be strictly integers (ex. 5, not 5.0)
 
+    # Confirm all indices were located
+    allFound = True
+    for j, ind in enumerate(indices):
+        if ind == -1:
+            allFound = False
+            raise ValueError(f"No match found for {c_components[j]}.")
+            return None
+            
     #---------- Compute progress variable
     c = np.zeros(len(data[0]))                #Initialize c array
     for d in range(len(data[0])):             #For each set of data points (each column),
@@ -92,6 +100,13 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         
         file = data_files[i]
         with open(file, 'r') as f:
+            #---------- Make sure the assigned L and t value are in the file name:
+            if str(Lvals[l]) not in f.name:
+                print(f"Warning: for file name '{f.name}', mismatch: L = {Lvals[l]}")
+            if str(tvals[t]) not in f.name:
+                print(f"Warning: for file name '{f.name}', mismatch: t = {tvals[t]}")
+
+            #---------- Get raw data
             lines = f.readlines()
             raw_data = np.array([line.strip() for line in lines if not line.startswith('#')])
 
@@ -116,9 +131,8 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         extras[l,t]  = extra
         
         #---------- Parse out numerical values
-        #NOTE: the following lines could be achieved with np.loadtxt(). This would require writing a modified file that only
-        #      had the data and headers, then reading it back in. Because we've already read in the lines to extract the headers, 
-        #      we can extract the data manually with a few extra lines of code.
+        #NOTE: the following lines could be achieved with np.loadtxt(). Because we've already read in the lines
+        #      to extract the headers, we can extract the data manually with a few extra lines of code.
         
         file_data = np.empty(len(raw_data[0].split()))     #Holds the data for this file
         for row in raw_data:
@@ -186,8 +200,10 @@ def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
     """
     #---------- Import data, files, and headers
     if get_data_files_output == None:
+        # No processed data passed in: must generate.
         data, headers, extras = get_data_files(path_to_flame_data, Lvals, tvals, file_pattern = file_pattern, c_components = c_components)
     else:
+        # Use pre-processed data
         data, headers, extras = get_data_files_output
     
     #---------- Get list of available phi (list of all data headers from original files)
@@ -275,11 +291,11 @@ def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$
             This should be the output of get_data_files, run with the relevant parameters matching those passed in to this function.
     """
     if get_data_files_output == None:
-        funcs = phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = file_pattern, c_components = c_components, 
-                        phi = phi, interpKind = interpKind, get_data_files_output = get_data_files_output)
+        # No processed data passed in: must generate.
+        funcs = phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = file_pattern, c_components = c_components, phi = phi, interpKind = interpKind, get_data_files_output = get_data_files_output)
     else:
-        funcs = phiFuncs(None, Lvals, tvals, file_pattern = file_pattern, c_components = c_components, phi = phi,
-                         get_data_files_output = get_data_files_output) 
+        # Use pre-processed data
+        funcs = phiFuncs(None, Lvals, tvals, file_pattern = file_pattern, c_components = c_components, phi = phi, get_data_files_output = get_data_files_output) 
 
     #---------- Create arrays of ξm and ξv
     Xims = np.linspace(0,1,numXim)      #Xim = Mean mixture fraction.
@@ -363,14 +379,13 @@ def createInterpolator(data, inds, method = 'cubic'):
         Function returned to the user. 
         Accepts values of Xi_mean, Xi_variance, length, and time scale. 
         """
-        xim_ind, xiv_ind, L_ind, t_ind = translate(xim, xiv, L, t)
-        return interpolator((xim_ind, xiv_ind, L_ind, t_ind))
+        return interpolator(translate(xim, xiv, L, t))
     
     return func
 
 ##############################
 
-def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, hc_avg = 10**5):
+def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, hc_avg = -1e5):
     """
     Solves for L,t given:
         h:   value of enthalpy
@@ -417,7 +432,79 @@ def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, hc_avg = 10**5):
     ig   = (Lavg, tavg)
     lowBounds = [Lbounds[0], tbounds[0]]
     highBounds = [Lbounds[1], tbounds[1]]
-    leastSq = least_squares(solve, ig, bounds = (lowBounds, highBounds))
+    leastSq = least_squares(solve, ig, bounds = (lowBounds, highBounds)).x
     #ridder(solve, lowBounds, highBounds) DOESN'T WORK: ridder can't accept vector functions
     #fsol = fsolve(solve, ig). Doesn't respect the bounds for some reason. 
-    return leastSq.x
+    return leastSq
+
+def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
+             phi = 'T', interpKind = 'cubic', numXim:type(1)=5, numXiv:type(1) = 5, get_data_files_output = None):
+    """
+    Creates a table of phi values in terms of Xim, Xiv, L, t
+    Inputs:
+        path_to_flame_data = path to simulation data relative to the current folder. 
+            NOTE: The data headers must be the last commented line before the data begins.
+            The code found at https://github.com/BYUignite/flame was used in testing. 
+        Each file will have been run under an array of conditions L,t:
+        Lvals: values of parameter L used, formatted as a list (ex. [ 0.002, 0.02, 0.2])
+        tvals: values of parameter t used, formatted as a list (ex. [ 0    , 1   , 2  ])
+        file_pattern = regular expression (regex) to identify which files in the target folder are data files. 
+            DEFAULT: r'^L.*.dat$'. This grabs any files that begin with "L" and end with ".dat". 
+        c_components = list defining which components' mixture fractions are included in the progress variable. 
+            By default, this is set to be ['H2', 'H2O', 'CO', 'CO2']
+        phi = single property or list of properties for which values will be tabulated (ex. 'T', 'rho', etc.), case sensitive. Default = 'T'
+            Available phi are viewable using "get_data_files(params)[1]".
+            NOTE: c (progress variable) is available in the data. By default, c ≡ y_CO2 + y_CO + y_H2O + yH2.
+            This definition can be changed by modifying the c_components parameter.
+        interpKind = specifies the method of interpolation that should be used (uses scipy.interp1d and RegularGridInterpolator). Default = 'cubic'. 
+        numXim, numXiv: Number of data points between bounds for ξm and ξv, respectively. Default value: 5
+        get_data_files_output = used to save time in the event that multiple tables are to be constructed. 
+            This should be the output of get_data_files, run with the relevant parameters matching those passed in to this function.
+    """
+    # Confirm h and c aren't in phi
+    for p in phi:
+        if p=='h' or p=='c':
+            print("'h' and 'c' are used as table axis and so cannot be used as phi. Cancelling operation.")
+            return None
+
+    # Ensure array-like
+    if type(phi) == type('str'):
+        phi = [phi,]
+
+    # Retrieve data
+    if get_data_files_output == None:
+        # No processed data passed in: must generate.
+        data_output = get_data_files(path_to_flame_data, Lvals, tvals, file_pattern = file_pattern, c_components = c_components)
+    else:
+        # Use pre-processed data
+        data_output = get_data_files_output
+
+    # Create h & c tables
+    h_table, h_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='h',
+                                         numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+    c_table, c_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='c',
+                                         numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+
+    # Create h & c interpolators
+    Ih = createInterpolator(h_table, h_indices, method = interpKind)
+    Ic = createInterpolator(c_table, c_indices, method = interpKind)
+
+    # Create array containing phi tables
+    phiTables = []
+    for p in phi:
+        # Get base table with phi data
+        table, indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi = p, 
+                                         numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+
+        # Create interpolator
+        InterpPhi = createInterpolator(table, indices, method = interpKind)
+        # Create function phi(xim, xiv, h, c)
+        Lbounds = [min(Lvals), max(Lvals)]
+        tbounds = [min(tvals), max(tvals)]
+        def phi_table(xim, xiv, h, c):
+            # Invert from (h, c) to (L, t)
+            L, t = Lt_hc(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds)
+            return InterpPhi(xim, xiv, L, t)
+
+        phiTables.append(phi_table)      
+    return phiTables
