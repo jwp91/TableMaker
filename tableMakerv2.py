@@ -3,13 +3,14 @@ from scipy.interpolate import interp1d
 from scipy.integrate import quad
 from scipy.optimize import fsolve, ridder, least_squares, root
 import os
+import warnings
 from glob import glob
 from re import match, search
 from statistics import variance
 import LiuInt as LI # Package with functions for integrating over the BPDF, parameterized by xi_avg and xi_variance
 from scipy.interpolate import RegularGridInterpolator as rgi
 
-##############################
+############################## tableMakerv2
 
 def computeProgressVariable(data, header, c_components = ['H2', 'H2O', 'CO', 'CO2']):
     """
@@ -164,7 +165,8 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
 
 ##############################
 
-def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'], phi = 'T', Lt = False, mix_frac_name = "mixf", interpKind = 'cubic', get_data_files_output = None):
+def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
+             phi = 'T', Lt = False, mix_frac_name = "mixf", interpKind = 'cubic', get_data_files_output = None):
     """
     Returns an array of interpolated functions phi(ξ) where phi is any property of the flame.
     Inputs:
@@ -265,7 +267,8 @@ def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
 
 ##############################
     
-def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'], phi = 'T', interpKind = 'cubic', numXim:type(1)=5, numXiv:type(1) = 5, get_data_files_output = None):
+def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
+                    phi = 'T', interpKind = 'cubic', numXim:int=5, numXiv:int = 5, get_data_files_output = None):
     """
     Creates a 4D lookup table of phi_avg data. Axis are ξm, ξv, L (length scale), and t (time scale). 
     Inputs:
@@ -321,6 +324,7 @@ def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$
     return table, indices
 
 ##############################
+
 def createInterpolator(data, inds, method = 'cubic'):
     """
     Creates an interpolator using RegularGridInterpolator (rgi).
@@ -334,29 +338,7 @@ def createInterpolator(data, inds, method = 'cubic'):
     Ls = inds[2]
     ts = inds[3]
 
-    Ls_indices = range(len(Ls))
-    interpolator = rgi((xi_means, xi_vars, Ls_indices, ts), data, method = method)
-
-    def translate(xim, xiv, L, t):
-        """
-        Translates xim, xiv, L, and t values to the forms used by the interpolator:
-            xim -> xim (no translation)
-            xiv -> xiv_norm (normalized to maximum)
-            L -> L_ind (linear indices)
-            t -> t     (no translation)
-        """
-        
-        xiv_max = xim*(1-xim)
-        if xiv > xiv_max:
-            raise ValueError(f"xiv must be less than xivMax. With xim = {xim}, xiv_max = {xiv_max}.")
-            return None
-        xiv_norm = xiv/xiv_max
-        
-        L_ind = interp1d(Ls, Ls_indices, kind = 'linear')(L)
-        #Using cubic interpolators here might be better if the length and time scales had more regular spacing. 
-        #If there are large gaps, a cubic interpolator can return out-of-bounds values when interpolating
-
-        return (xim, xiv_norm, L_ind, t)
+    interpolator = rgi((xi_means, xi_vars, Ls, ts), data, method = method)
 
     def func(xim, xiv, L, t):
         # Function returned to the user.
@@ -367,7 +349,12 @@ def createInterpolator(data, inds, method = 'cubic'):
             Length scale
             Time scale
         """
-        return interpolator(translate(xim, xiv, L, t))
+        xiv_max = xim*(1-xim)
+        if xiv > xiv_max:
+            raise ValueError(f"xiv must be less than xivMax. With xim = {xim}, xiv_max = {xiv_max}.")
+            return None
+        xiv_norm = xiv/xiv_max
+        return interpolator([xim, xiv_norm, L, t])
     
     return func
     
@@ -375,6 +362,7 @@ def createInterpolator(data, inds, method = 'cubic'):
 
 def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
     """
+    DEPRECATED: code uses Lt_hc_newton now
     Solves for L,t given:
               h: value of enthalpy
               c: value of progress variable
@@ -419,14 +407,117 @@ def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
     Lavg = np.median(Lbounds)
     tavg = np.median(tbounds)
     ig   = (Lavg, tavg)
-    lowBounds = [Lbounds[0], tbounds[0]]
+    lowBounds = [Lbounds[0], tbounds[0]] #DEBUG: this used to be mean: now this doesn't make sense. median of two values..?
     highBounds = [Lbounds[1], tbounds[1]]
     zero = least_squares(solve, ig, bounds = (lowBounds, highBounds)).x
     print("resids = ", solve(zero))      #DEBUGGING
     return zero
 
+def Lt_hc_newton(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
+    """
+    Solves for L,t using a 2D Newton solver.
+    Params:
+              h: value of enthalpy
+              c: value of progress variable
+            xim: mean mixture fraction
+            xiv: mixture fraction variance
+        hInterp: interpolated function for h(xim, xiv, L, t), created using "createInterpolator"
+        cInterp: interpolated function for c(xim, xiv, L, t), created using "createInterpolator"
+        Lbounds: tuple containing the minimum and maximum value of L
+        tbounds: tuple contianing the minimum and maximum value of L
+        norm   := np.max(h_table)/np.max(c_table). Compensates for the large difference in magnitude between typical h and c values.
+            
+    Returns a tuple of form (L,t)
+    This function is to be used for getting values of phi by phi(xim, xiv, [L,t](h,c))
+    """
+    # NOTE: The following functions assume constant xim and xiv. 
+    # These parameters are included in F and X to allow a generic function to be used.
+    def getJac(F, X0):
+        """Computes the 2x2 Jacobian of F(X) at X
+        Params:
+            F = F(mvlt) = [h(mvlt) - hSet, c(mvlt)-cSet]
+                Example code:
+                def F(mvlt):
+                    return np.array([hInterp(*mvlt)-hSet, cInterp(*mvlt)-cSet])
+            X0 = [xim, xiv L, t]
+        Returns:
+            J = [[dH/dL  dH/dt],
+                [dc/dL  dc/dt]]
+        """
+        # Confirm X is an array
+        X0 = np.array(X0)
+
+        # Get initial point
+        F0 = F(X0)
+
+        # Set deltas
+        eps = 1e-16 # machine precision
+        scalar = np.sqrt(eps)
+        deltaL = np.array([0, 0, X0[2]*scalar, 0])
+        deltat = np.array([0, 0, 0, X0[3]*scalar])
+        
+        # Compute gradients
+        J0 = (F(X0 + deltaL)-F0)/deltaL[2]  # = [dH/dL, dc/dL]
+        J1 = (F(X0 + deltat)-F0)/deltat[3]  # = [dH/dt, dc/dt]
+
+        return np.array([J0, J1]).T
+    
+    def cramerSolve(F, X0):
+        """
+        Solves the system of equations JX=F(X0) for X using Cramer's rule.
+        Params:
+            F: f(mvlt) = [h(mvlt)-hSet, c(mvlt)-cSet]
+            X0: [xim, xiv L, t]
+        Returns:
+            X = [J^(-1)][F(X0)]
+        """
+        # Confirm X is an array
+        X0 = np.array(X0)
+
+        # Solve the system
+        J = getJac(F, X0)
+        F0 = F(X0)
+        x = (F0[0]*J[1][1] - J[0][1]*F0[1])/(J[0][0]*J[1][1] - J[0][1]*J[1][0])
+        y = (J[0][0]*F0[1] - F0[0]*J[1][0])/(J[0][0]*J[1][1] - J[0][1]*J[1][0])
+        return np.array([0, 0, x, y])
+
+    # Set up function and initial state
+    def F(mvlt):
+        return np.array([hInterp(*mvlt)-h, (cInterp(*mvlt)-c)*norm]) # norm ensures both h and c are of similar magnitude
+    Lmed = np.mean(Lbounds)
+    tmed = np.mean(tbounds)
+    
+    # Create initial guess
+    # Get the directory of the current Python script
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Check if "file.txt" exists in the same directory
+    file_path = os.path.join(current_dir, "newtonsolve_lastsolution.txt")
+
+    if os.path.isfile(file_path):
+        guess = np.loadtxt("newtonsolve_lastsolution.txt")
+    else:
+        guess   = (xim, xiv, Lmed, tmed)
+
+    # Solve parameters
+    tolerance = np.ones(len(guess))*1e-2  # Minimum change for 
+    maxIter = 100
+
+    # Solve
+    change = cramerSolve(F, guess)
+    while (np.abs(change) > tolerance).any():
+        guess -= change
+        change = cramerSolve(F, guess)
+        iterations += 1
+        if iterations > maxIter:
+            warnings.warn("Maximum iterations exceeded in hc_Lt Newton solve. Result may be inaccurate.")
+
+    # Store solution to use as initial guess next time
+    np.savetxt("newtonsolve_lastsolution.txt", guess)
+    return guess
+
 def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
-             phi = 'T', interpKind = 'cubic', numXim:type(1)=5, numXiv:type(1) = 5, get_data_files_output = None):
+             phi = 'T', interpKind = 'cubic', numXim:int=5, numXiv:int = 5, get_data_files_output = None):
     """
     Creates a table of phi values in terms of Xim, Xiv, L, t
     Inputs:
@@ -492,7 +583,7 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         tbounds = [min(tvals), max(tvals)]
         def phi_table(xim, xiv, h, c):
             # Invert from (h, c) to (L, t)
-            L, t = Lt_hc(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm)
+            L, t = Lt_hc_newton(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm)
             return InterpPhi(xim, xiv, L, t)
 
         phiTables.append(phi_table)      

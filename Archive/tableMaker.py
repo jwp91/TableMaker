@@ -1,12 +1,12 @@
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.integrate import quad
-from scipy.optimize import fsolve, ridder, least_squares
+from scipy.optimize import fsolve, ridder, least_squares, root
 import os
 from glob import glob
 from re import match, search
 from statistics import variance
-import LiuInt as LI #Package with functions for integrating over the BPDF, parameterized by xi_avg and xi_variance
+import LiuInt as LI # Package with functions for integrating over the BPDF, parameterized by xi_avg and xi_variance
 from scipy.interpolate import RegularGridInterpolator as rgi
 
 ##############################
@@ -25,12 +25,12 @@ def computeProgressVariable(data, header, c_components = ['H2', 'H2O', 'CO', 'CO
             The strings in the list should each match a string used in 'header'
     """
     #---------- Determine where the c_components are in 'data'
-    indices = np.empty(len(c_components), dtype = np.int8)
-    for i in range(len(header)):              #For each element in the header, 
-        for y in range(len(c_components)):      #Check for a match among the passed-in c_components
+    indices = np.ones(len(c_components), dtype = np.int8)*-1
+    for i in range(len(header)):                # For each element in the header, 
+        for y in range(len(c_components)):      # Check for a match among the passed-in c_components
             if header[i]==c_components[y].replace(" ",""):
-                indices[y] = int(i)           #Indices must be strictly integers (ex. 5, not 5.0)
-
+                indices[y] = int(i)             # Indices must be strictly integers (ex. 5, not 5.0)
+                
     # Confirm all indices were located
     allFound = True
     for j, ind in enumerate(indices):
@@ -38,7 +38,7 @@ def computeProgressVariable(data, header, c_components = ['H2', 'H2O', 'CO', 'CO
             allFound = False
             raise ValueError(f"No match found for {c_components[j]}.")
             return None
-            
+
     #---------- Compute progress variable
     c = np.zeros(len(data[0]))        # Initialize c array
     for d in range(len(data[0])):     # For each set of data points (each column),
@@ -89,9 +89,9 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
             data_files= np.append(data_files, file)
 
     #---------- Initialize data arrays
-    all_data = np.empty((len(Lvals),len(tvals)), dtype=np.ndarray)    #initialize to grab data values
-    headers  = np.empty((len(Lvals),len(tvals)), dtype=np.ndarray)    #Initialize to store headers
-    extras   = np.empty((len(Lvals),len(tvals)), dtype=np.ndarray)    #initialize to store extra info before header
+    all_data = np.empty((len(Lvals),len(tvals)), dtype=np.ndarray)  # Initialize to grab data values
+    headers  = np.empty((len(Lvals),len(tvals)), dtype=np.ndarray)  # Initialize to store headers
+    extras   = np.empty((len(Lvals),len(tvals)), dtype=np.ndarray)  # Initialize to store extra info before header
 
     #---------- Grab and store data
     for i in range(len(data_files)):
@@ -134,11 +134,11 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         #NOTE: the following lines could be achieved with np.loadtxt(). Because we've already read in the lines
         #      to extract the headers, we can extract the data manually with a few extra lines of code.
         
-        file_data = np.empty(len(raw_data[0].split()))     #Holds the data for this file
+        file_data = np.empty(len(raw_data[0].split()))     # Holds the data for this file
         for row in raw_data:
             numbers = np.array([float(val) for val in row.split()])
-            file_data = np.vstack((file_data,numbers)) #Adds each new row of data as a new row in file_data
-        file_data = file_data[1:file_data.size]        #Get rid of first column (which is empty and only used for initialization)
+            file_data = np.vstack((file_data,numbers))     # Adds each new row of data as a new row in file_data
+        file_data = file_data[1:file_data.size]            # Get rid of first column (which is empty and only used for initialization)
 
         #---------- Transpose data so that each row contains data for a certain property (ex. one row is temperature data, one is density, etc.)
         transposed_file_data = file_data.T
@@ -208,11 +208,11 @@ def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
     
     #---------- Get list of available phi (list of all data headers from original files)
     if type(Lt) == bool:
-        #User did not specify a specific file.
-        #This code here assumes that all datafiles have the same column labels and ordering:
+        # User did not specify a specific file.
+        # This code here assumes that all datafiles have the same column labels and ordering:
         phis = headers[0][0] 
     elif Lt[0] < len(headers) and Lt[1] < len(headers[0]):
-        #user specified a file and the indices were valid.
+        # User specified a file and the indices were valid.
         phis = headers[Lt[0]][Lt[1]]
     else:
         # User specified a file and the indices were invalid.
@@ -382,7 +382,7 @@ def createInterpolator(data, inds, method = 'cubic'):
         return interpolator(translate(xim, xiv, L, t))
     
     return func
-
+    
 ##############################
 
 def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, hc_avg = -1e5):
