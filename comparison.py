@@ -1,6 +1,7 @@
 # Import Packages
 import matplotlib.pyplot as plt 
 import codes.TableMakerMain.postGit.Archive.tableMaker as tableMaker
+import numpy as np
 
 #----- Load in data
 from codes.TableMakerMain.postGit.Archive.tableMaker import *

@@ -325,12 +325,12 @@ def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$
 
 ##############################
 
-def createInterpolator(data, inds, method = 'cubic'):
+def createInterpolator(data, inds, method = 'linear'):
     """
     Creates an interpolator using RegularGridInterpolator (rgi).
     Inputs:
         data, inds =  table and indices created by makeLookupTable
-        method = interpolation method that RegularGridInterpolator should use. Default = 'cubic'
+        method = interpolation method that RegularGridInterpolator should use. Default = 'linear'
     The returned function is called with func(xim, xiv, L, t)
     """
     xi_means = inds[0]
@@ -354,6 +354,7 @@ def createInterpolator(data, inds, method = 'cubic'):
             raise ValueError(f"xiv must be less than xivMax. With xim = {xim}, xiv_max = {xiv_max}.")
             return None
         xiv_norm = xiv/xiv_max
+        print("Values passed into interpolator: ", xim, xiv_norm, L, t, "( xiv=", xiv, ")") #DEBUGGING
         return interpolator([xim, xiv_norm, L, t])
     
     return func
@@ -383,7 +384,7 @@ def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
 
         #----------- Ensure value is within interpolator's bounds
         buffer = 1e-8
-        penalty = (1e10, 1e10)
+        penalty = [1e10, 1e10]
         if L < Lbounds[0]:
             return penalty
             L = Lbounds[0] + buffer
@@ -413,12 +414,12 @@ def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
     print("resids = ", solve(zero))      #DEBUGGING
     return zero
 
-def Lt_hc_newton(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
+def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
     """
     Solves for L,t using a 2D Newton solver.
     Params:
-              h: value of enthalpy
-              c: value of progress variable
+          hgoal: value of enthalpy
+          cgoal: value of progress variable
             xim: mean mixture fraction
             xiv: mixture fraction variance
         hInterp: interpolated function for h(xim, xiv, L, t), created using "createInterpolator"
@@ -432,7 +433,12 @@ def Lt_hc_newton(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
     """
     # NOTE: The following functions assume constant xim and xiv. 
     # These parameters are included in F and X to allow a generic function to be used.
-    def getJac(F, X0):
+
+    def F(mvlt):
+        # Computes h and c from a set mvlt
+        return np.array([hInterp(*mvlt)-hgoal, (cInterp(*mvlt)-cgoal)*norm]) # norm ensures both h and c are of similar magnitude
+    
+    def getJac(F, X0, F0=None):
         """Computes the 2x2 Jacobian of F(X) at X
         Params:
             F = F(mvlt) = [h(mvlt) - hSet, c(mvlt)-cSet]
@@ -440,19 +446,21 @@ def Lt_hc_newton(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
                 def F(mvlt):
                     return np.array([hInterp(*mvlt)-hSet, cInterp(*mvlt)-cSet])
             X0 = [xim, xiv L, t]
+            F0 = F(X0)
         Returns:
             J = [[dH/dL  dH/dt],
                 [dc/dL  dc/dt]]
         """
         # Confirm X is an array
         X0 = np.array(X0)
+        #print("GetJac initial point: ", X0) #DEGBUGGING
 
-        # Get initial point
-        F0 = F(X0)
+        # Compute F0 if not passed in 
+        if F0 is None:
+            F0 = F(X0)
 
         # Set deltas
-        eps = 1e-16 # machine precision
-        scalar = np.sqrt(eps)
+        scalar = 1e-8 #square root of the machine precision
         deltaL = np.array([0, 0, X0[2]*scalar, 0])
         deltat = np.array([0, 0, 0, X0[3]*scalar])
         
@@ -471,21 +479,42 @@ def Lt_hc_newton(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
         Returns:
             X = [J^(-1)][F(X0)]
         """
+        #print("Cramer Solve") # DEBUGGING
+        
         # Confirm X is an array
         X0 = np.array(X0)
 
         # Solve the system
-        J = getJac(F, X0)
         F0 = F(X0)
-        x = (F0[0]*J[1][1] - J[0][1]*F0[1])/(J[0][0]*J[1][1] - J[0][1]*J[1][0])
-        y = (J[0][0]*F0[1] - F0[0]*J[1][0])/(J[0][0]*J[1][1] - J[0][1]*J[1][0])
-        return np.array([0, 0, x, y])
+        J = getJac(F, X0, F0)
 
-    # Set up function and initial state
-    def F(mvlt):
-        return np.array([hInterp(*mvlt)-h, (cInterp(*mvlt)-c)*norm]) # norm ensures both h and c are of similar magnitude
-    Lmed = np.mean(Lbounds)
-    tmed = np.mean(tbounds)
+        # TODO: Determine the location of the pivot element (the row that has the larger first element)
+        # You can then just have an "if" statement to determine which version of Kramer's to use
+        # (either the one below or the one that uses swapped rows).
+
+        #print(F0, J) #DEBUGGING
+        Lchange = (F0[0]*J[1][1] - J[0][1]*F0[1])/(J[0][0]*J[1][1] - J[0][1]*J[1][0])
+        tchange = (J[0][0]*F0[1] - F0[0]*J[1][0])/(J[0][0]*J[1][1] - J[0][1]*J[1][0])
+
+        # Relax solver: don't allow changes more than a certain fraction of the total domain
+        maxFrac = 0.05 # Maximum allowable %change relative to the domain
+        
+        Lrange = np.abs(max(Lbounds) - min(Lbounds))
+        trange = np.abs(max(tbounds) - min(tbounds))
+        Lsign = Lchange/np.abs(Lchange)
+        tsign = tchange/np.abs(tchange)
+        
+        Lchange = np.min([np.abs(Lchange), Lrange*maxFrac])*Lsign
+        tchange = np.min([np.abs(tchange), trange*maxFrac])*tsign
+
+        # Ensure values returned are floats
+        if isinstance(Lchange, np.ndarray):
+            Lchange = Lchange[0]
+        if isinstance(tchange, np.ndarray):
+            tchange = tchange[0]
+        
+        #print("Cramer computed change: ", Lchange, tchange) #DEBUGGING
+        return np.array([0, 0, Lchange, tchange])
     
     # Create initial guess
     # Get the directory of the current Python script
@@ -494,30 +523,111 @@ def Lt_hc_newton(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
     # Check if "file.txt" exists in the same directory
     file_path = os.path.join(current_dir, "newtonsolve_lastsolution.txt")
 
-    if os.path.isfile(file_path):
+    Lmed = np.mean(Lbounds)
+    tmed = np.mean(tbounds)
+    if os.path.isfile(file_path) and False: # DEBUGGING
         guess = np.loadtxt("newtonsolve_lastsolution.txt")
+        guess[0], guess[1] = (xim, xiv)
     else:
-        guess   = (xim, xiv, Lmed, tmed)
+        guess   = [xim, xiv, Lmed, tmed]
 
     # Solve parameters
-    tolerance = np.ones(len(guess))*1e-2  # Minimum change for 
+    tolerance = 1e-8  # Minimum SSE for solver to terminate
     maxIter = 100
-
+    states = np.tile(guess, (maxIter, 1))
+    errors = np.zeros(maxIter)
+    Lmin = Lbounds[0]+1e-4
+    Lmax = Lbounds[1]-1e-4
+    tmin = tbounds[0]+1e-4
+    tmax = tbounds[1]-1e-4
+    
     # Solve
-    change = cramerSolve(F, guess)
-    while (np.abs(change) > tolerance).any():
-        guess -= change
+    for i in range(maxIter):    
+        #print("Iteration: ", i) # Feedback
+        
+        # Compute new point
         change = cramerSolve(F, guess)
-        iterations += 1
-        if iterations > maxIter:
-            warnings.warn("Maximum iterations exceeded in hc_Lt Newton solve. Result may be inaccurate.")
+        guess -= change
+
+        # Enforce bounds
+        # Note: if the new point is out of bounds, it will first correct the solver to a point very close to the boundary. 
+        #       If the point has been sitting at the boundary for 2 iterations, it will replace it to the median point of the domain. 
+        #       Ideally, this prevents the solver from getting stuck at a boundary and will increase the number of states it can probe.
+        if guess[2] < Lbounds[0]:
+            guess[2] = Lmin
+            if i > 2 and (states[i-2] == guess).all():
+                guess[2] = Lmed
+                #print("Adjusted Lchange to mean L")    # Feedback
+            else:
+                #print("Adjusted Lchange to minimum L") # Feedback
+                pass
+        elif guess[2] > Lbounds[1]:
+            guess[2] = Lmax
+            if i > 2 and (states[i-2] == guess).all():
+                guess[2] = Lmed
+                #print("Adjusted Lchange to mean L")     # Feedback
+            else:
+                #print("Adjusted Lchange to maximum L")  # Feedback
+                pass
+        if guess[3] < tbounds[0]:
+            guess[3] = tmin
+            if i > 2 and (states[i-2] == guess).all():
+                guess[3] = tmed
+                #print("Adjusted tchange to mean t")     # Feedback
+            else:
+                #print("Adjusted tchange to minimum t")  # Feedback
+                pass
+        elif guess[3] > tbounds[1]:
+            guess[3] = tmax
+            if i > 2 and (states[i-2] == guess).all():
+                guess[3] = tmed
+                #print("Adjusted tchange to mean t")     # Feedback
+            else:
+                #print("Adjusted tchange to maximum t")  # Feedback
+                pass
+
+        # If solver gets stuck, stick it somewhere random
+        if i > 2 and (states[i-2] == guess).all():
+            guess[2] = np.random.rand()*(Lmax-Lmin) + Lmin
+            guess[3] = np.random.rand()*(tmax-tmin) + tmin
+            #print("Solver got stuck: randomized guess.")# Feedback
+                
+        # Compute SSE for this point
+        errors[i] = np.sum([err**2 for err in F(guess)])
+        states[i] = guess # Record point in case no solution is found
+        #print("SSE: ", errors[i])                       # Feedback
+        # print("State record: \n", states[i], "\n", states[i-1], "\n", states[i-2]) # Feedback
+        #print()                                         # Feedback
+        
+        # Evaluate if change is small enough to end loop early
+        if errors[i] < 1e-8:
+            break # Tolerance met: end loop
+
+        # Throw warning if max iterations is exceeded
+        if i==maxIter-1:
+            # If maxIter is reached, return the case with the lowest computed SSE:
+            warnings.warn(f"""
+            
+            Maximum iterations ({maxIter}) exceeded in Lt_hc_newton solver.
+            This indicates that the exact queried [xim, xiv, h, c] point was not found in the table.
+            Using best-case computed result:
+                xim = {guess[0]}
+                xiv = {guess[1]}
+                L   = {guess[2]}
+                t   = {guess[3]}, where
+                Sum of Squared Error for this point in (h,c) -> (L,t) inversion = {errors[i]:.5g}
+                Average Sum of Square Error for all attepts at this inversion   = {np.mean(errors):5g}
+            Result may be inaccurate.
+            """)
+            guess = states[errors == np.min(errors)][0]
+            break
 
     # Store solution to use as initial guess next time
     np.savetxt("newtonsolve_lastsolution.txt", guess)
-    return guess
+    return [guess[2], guess[3]]
 
 def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
-             phi = 'T', interpKind = 'cubic', numXim:int=5, numXiv:int = 5, get_data_files_output = None):
+             phi = 'T', interpKind = 'cubic', numXim:int=5, numXiv:int = 5, get_data_files_output = None, parallel = True):
     """
     Creates a table of phi values in terms of Xim, Xiv, L, t
     Inputs:
@@ -536,10 +646,14 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
             NOTE: c (progress variable) is available in the data. By default, c ≡ y_CO2 + y_CO + y_H2O + yH2.
             This definition can be changed by modifying the c_components parameter.
         interpKind = specifies the method of interpolation that should be used (uses scipy.interp1d and RegularGridInterpolator). Default = 'cubic'. 
+            Note: this is the kind of interpolation that the phi functions will be created with. Once the tabulated values have been created, the rest of the table
+                  will be created with a linear interpolation. This prevents excursions to beyond the system bounds due to sparse data. 
         numXim, numXiv: Number of data points between bounds for ξm and ξv, respectively. Default value: 5
         get_data_files_output = used to save time in the event that multiple tables are to be constructed. 
             This should be the output of get_data_files, run with the relevant parameters matching those passed in to this function.
+        parallel:bool = if set to True (default), the code will attempt to create tables in parallel.
     """
+    # ------------ Pre-processing
     # Confirm h and c aren't in phi
     for p in phi:
         if p=='h' or p=='c':
@@ -558,33 +672,75 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         # Use pre-processed data
         data_output = get_data_files_output
 
-    # Create h & c tables
-    h_table, h_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='h',
-                                         numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
-    c_table, c_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='c',
-                                         numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+    Lbounds = [min(Lvals), max(Lvals)]
+    tbounds = [min(tvals), max(tvals)]
 
-    # Create h & c interpolators
-    norm = np.max(h_table)/np.max(c_table)
-    Ih = createInterpolator(h_table, h_indices, method = interpKind)
-    Ic = createInterpolator(c_table, c_indices, method = interpKind)
+    # ------------ Compute tables, parallel or serial
+    if not parallel: # Serial computation
+        # Create h & c tables
+        h_table, h_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='h', numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+        c_table, c_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='c', numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+    
+        # Create h & c interpolators
+        Ih = createInterpolator(h_table, h_indices, method = 'linear') #These should only be set to cubic with a very dense table.
+        Ic = createInterpolator(c_table, c_indices, method = 'linear')
+    
+        # Create array containing phi tables
+        norm = np.max(h_table)/np.max(c_table)
+        phiTables = []
+        for p in phi:
+            # Get base table with phi data
+            table, indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi = p, numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+    
+            # Create interpolator for phi
+            InterpPhi = createInterpolator(table, indices)
+            
+            # Create function phi(xim, xiv, h, c)
+            def phi_table(xim, xiv, h, c):
+                # Invert from (h, c) to (L, t), then return interpolated value.
+                L, t = Lt_hc_newton(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm)
+                return InterpPhi(xim, xiv, L, t)
+    
+            phiTables.append(phi_table)      
+        return phiTables
+        
+    else: # Parallel computation
+        # Import needed packages
+        from concurrent.futures import ProcessPoolExecutor
+        import concurrent
+        
+        def create_table(args):
+            # Generic table-generating function
+            path, Lvals, tvals, phi, numXim, numXiv, data_output_old, c_components, interpKind, file_pattern = args
+            return tableMaker.makeLookupTable(path, Lvals, tvals, phi=phi, numXim = numXim, numXiv = numXiv, get_data_files_output = data_output_old, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
 
-    # Create array containing phi tables
-    phiTables = []
-    for p in phi:
-        # Get base table with phi data
-        table, indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi = p, 
-                                         numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+        phi = np.append(np.array(['h', 'c']), np.array(phi)) # Need to create h and c tables too, so add them here. 
+        table_args = [(path_to_flame_data, Lvals, tvals, p, numXim, numXiv, get_data_files_output, c_components, interpKind, file_pattern) for p in phi] # Arguments for each table's creation
 
-        # Create interpolator
-        InterpPhi = createInterpolator(table, indices, method = interpKind)
-        # Create function phi(xim, xiv, h, c)
-        Lbounds = [min(Lvals), max(Lvals)]
-        tbounds = [min(tvals), max(tvals)]
-        def phi_table(xim, xiv, h, c):
-            # Invert from (h, c) to (L, t)
-            L, t = Lt_hc_newton(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm)
-            return InterpPhi(xim, xiv, L, t)
+        # Parallel table creation (should be reviewed)
+        with ProcessPoolExecutor() as executor:
+            futures = {executor.submit(create_table, args): idx for idx, args in enumerate(table_args)}
+            results = {}
+            for future in concurrent.futures.as_completed(futures):
+                idx = futures[future]
+                try:
+                    results[idx] = future.result()
+                except Exception as e:
+                    print(f"Table creation for index {idx} (phi = {phi[idx]} generated an exception: {e}")
 
-        phiTables.append(phi_table)      
-    return phiTables
+        # Create h & c interpolators -- These should only be set to cubic interpolation with a very dense table.
+        Ih = createInterpolator(results[0][0], results[0][1], method = 'linear')
+        Ic = createInterpolator(results[1][0], results[1][1], method = 'linear')
+        
+        phiTables = []
+        norm = np.max(results[0][0])/np.max(results[1][0])
+        for i in range(len(phi-2)):
+            InterpPhi = createInterpolator(*results[i+2])
+            # Create function phi(xim, xiv, h, c)
+            def phi_table(xim, xiv, h, c):
+                # Invert from (h, c) to (L, t)
+                L, t = Lt_hc_newton(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm)
+                return InterpPhi(xim, xiv, L, t)
+    
+            phiTables.append(phi_table) 
+        return phiTables
