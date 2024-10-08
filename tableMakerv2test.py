@@ -51,17 +51,17 @@ data_output_old = tableMaker.get_data_files(path, Lvals, tvals)
 
 #----- Create T Table
 # Serial version
-table_old, indices_old = tableMaker.makeLookupTable(path, Lvals, tvals, phi='T',
-                                    numXim = numXim, numXiv = numXiv, 
-                                    get_data_files_output = data_output_old)
-h_table_old, h_indices_old = tableMaker.makeLookupTable(path, Lvals, tvals, phi='h',
-                                    numXim = numXim, numXiv = numXiv, 
-                                    get_data_files_output = data_output_old)
-c_table_old, c_indices_old = tableMaker.makeLookupTable(path, Lvals, tvals, phi='c',
-                                    numXim = numXim, numXiv = numXiv, 
-                                    get_data_files_output = data_output_old)
-end = time.time()
-print(f"TableGen without parallelization: {end-start}")
+#table_old, indices_old = tableMaker.makeLookupTable(path, Lvals, tvals, phi='T',
+#                                    numXim = numXim, numXiv = numXiv, 
+#                                    get_data_files_output = data_output_old)
+#h_table_old, h_indices_old = tableMaker.makeLookupTable(path, Lvals, tvals, phi='h',
+#                                    numXim = numXim, numXiv = numXiv, 
+#                                    get_data_files_output = data_output_old)
+#c_table_old, c_indices_old = tableMaker.makeLookupTable(path, Lvals, tvals, phi='c',
+#                                    numXim = numXim, numXiv = numXiv, 
+#                                    get_data_files_output = data_output_old)
+#end = time.time()
+#print(f"TableGen without parallelization: {end-start}")
 
 # Parallel version
 def create_table(args):
