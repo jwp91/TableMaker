@@ -9,6 +9,7 @@ from re import match, search
 from statistics import variance
 import LiuInt as LI # Package with functions for integrating over the BPDF, parameterized by xi_avg and xi_variance
 from scipy.interpolate import RegularGridInterpolator as rgi
+from datetime import datetime
 
 ############################## tableMakerv2
 
@@ -351,7 +352,7 @@ def createInterpolator(data, inds, method = 'linear'):
         """
         xiv_max = xim*(1-xim)
         if xiv > xiv_max:
-            raise ValueError(f"xiv must be less than xivMax. With xim = {xim}, xiv_max = {xiv_max}.")
+            raise ValueError(f"xiv must be less than xivMax. With xim = {xim}, xiv_max = {xiv_max}. Input xiv = {xiv}")
         if xiv_max == 0:
             if xiv != 0:
                 print(f"Warning: xim = {xim}, meaning xiv_max = 0. xiv passed in was {xiv}, but has been overridden to xiv = 0.")
@@ -424,7 +425,8 @@ def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
     return zero
 
 def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds, 
-                 norm, detailedWarn:bool = False, maxIter:int = 100):
+                 norm, detailedWarn:bool = False, maxIter:int = 100, saveSolverStates:bool = False, 
+                 useStoredSolution:bool = True):
     """
     Solves for L,t using a 2D Newton solver.
     Params:
@@ -439,7 +441,11 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
         norm   := np.max(h_table)/np.max(c_table). Compensates for the large difference in magnitude between typical h and c values.
         detailedWarn: If set to true, more detailed warnings will be raised when the solver does not converge.    
         maxIter: int, sets a limit for the maximum iterations the solver should make.
-
+        saveSolverStates: bool, if set to True, the solver states will be saved to a file in the folder "solver_data"
+        useStoredSolution:bool, if set to False, the solver will not use the last solution as its initial guess. 
+            Using the last initial guess (default) is generally good: CFD will solve cell-by-cell, and nearby
+            cells are expected to have similar values of phi.
+        
     Returns a tuple of form (L,t)
     This function is to be used for getting values of phi by phi(xim, xiv, [L,t](h,c))
     """
@@ -480,13 +486,13 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
         
         # Compute gradients
         # TO DO: add if-else here. Right now, adding deltas can exceed boundaries...
-        if X0[2] + X0[2]*scalar > Lbounds[1]:
+        if X0[2] + deltaL[2] > Lbounds[1]:
             # Avoid stepping over L boundary when adding deltaL
             J0 = (F0 - F(X0 - deltaL))/deltaL[2]  # = [dH/dL, dc/dL]
         else:
             J0 = (F(X0 + deltaL) - F0)/deltaL[2]  # = [dH/dL, dc/dL]
 
-        if X0[3] + X0[3]*scalar > tbounds[1]:
+        if X0[3] + deltat[3] > tbounds[1]:
             # Avoid stepping over t boundary when adding deltat
             J1 = (F0 - F(X0 - deltat))/deltat[3]  # = [dH/dt, dc/dt]
         else:
@@ -512,10 +518,6 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
         F0 = F(X0)
         J = getJac(F, X0, F0)
 
-        # TODO: Determine the location of the pivot element (the row that has the larger first element)
-        # You can then just have an "if" statement to determine which version of Kramer's to use
-        # (either the one below or the one that uses swapped rows).
-
         #print("F0 = ", F0) #DEBUGGING
         #print("J  = ", J, np.array(J).shape)  #DEBUGGING
         D = (J[0][0]*J[1][1] - J[0][1]*J[1][0])
@@ -540,8 +542,7 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
             tchange = tchange[0]
 
         # Relax solver: don't allow changes more than a certain fraction of the total domain
-        maxFrac = 0.05 # Maximum allowable %change relative to the domain
-        
+        maxFrac = 0.2*xim if xim > 0.055 else 0.01 # Maximum allowable %change relative to the domain
         Lrange = np.abs(max(Lbounds) - min(Lbounds))
         trange = np.abs(max(tbounds) - min(tbounds))
         if Lchange != 0:
@@ -568,7 +569,7 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
 
     Lmed = np.mean(Lbounds)
     tmed = np.mean(tbounds)
-    if os.path.isfile(file_path): # DEBUGGING
+    if os.path.isfile(file_path) and useStoredSolution:
         guess = np.loadtxt("newtonsolve_lastsolution.txt")
         guess[0], guess[1] = (xim, xiv)
     else:
@@ -577,13 +578,14 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
     # Solve parameters
     tolerance = 1e-8  # Minimum SSE for solver to terminate
     states = np.tile(guess, (maxIter, 1))
-    errors = np.zeros(maxIter)
-    Lmin = Lbounds[0]+1e-4
-    Lmax = Lbounds[1]-1e-4
-    tmin = tbounds[0]+1e-4
-    tmax = tbounds[1]-1e-4
+    errors = np.ones(maxIter)
+    Lmin = Lbounds[0]+1e-6
+    Lmax = Lbounds[1]-1e-6
+    tmin = tbounds[0]+1e-6
+    tmax = tbounds[1]-1e-6
     
     # Solve
+    i=0 # Use this later to truncate saved data
     for i in range(maxIter):    
         #print("Iteration: ", i) # Feedback
         
@@ -595,41 +597,41 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
         # Note: if the new point is out of bounds, it will first correct the solver to a point very close to the boundary. 
         #       If the point has been sitting at the boundary for 2 iterations, it will replace it to the median point of the domain. 
         #       Ideally, this prevents the solver from getting stuck at a boundary and will increase the number of states it can probe.
-        if guess[2] < Lbounds[0]:
+        if guess[2] <= Lbounds[0]:
             guess[2] = Lmin
-            if i > 2 and (states[i-2] == guess).all():
-                guess[2] = Lmed
-                #print("Adjusted Lchange to mean L")    # Feedback
-            else:
-                #print("Adjusted Lchange to minimum L") # Feedback
-                pass
-        elif guess[2] > Lbounds[1]:
+        if i > 2 and states[i-2][2] == guess[2]:
+            guess[2] = Lmed
+            #print("Adjusted Lchange to mean L")    # Feedback
+        else:
+            #print("Adjusted Lchange to minimum L") # Feedback
+            pass
+        if guess[2] >= Lbounds[1]:
             guess[2] = Lmax
-            if i > 2 and (states[i-2] == guess).all():
-                guess[2] = Lmed
-                #print("Adjusted Lchange to mean L")     # Feedback
-            else:
-                #print("Adjusted Lchange to maximum L")  # Feedback
-                pass
-        if guess[3] < tbounds[0]:
+        if i > 2 and states[i-2][2] == guess[2]:
+            guess[2] = Lmed
+            #print("Adjusted Lchange to mean L")     # Feedback
+        else:
+            #print("Adjusted Lchange to maximum L")  # Feedback
+            pass
+        if guess[3] <= tbounds[0]:
             guess[3] = tmin
-            if i > 2 and (states[i-2] == guess).all():
-                guess[3] = tmed
-                #print("Adjusted tchange to mean t")     # Feedback
-            else:
-                #print("Adjusted tchange to minimum t")  # Feedback
-                pass
-        elif guess[3] > tbounds[1]:
+        if i > 2 and states[i-2][3] == guess[3]:
+            guess[3] = tmed
+            #print("Adjusted tchange to mean t")     # Feedback
+        else:
+            #print("Adjusted tchange to minimum t")  # Feedback
+            pass
+        if guess[3] >= tbounds[1]:
             guess[3] = tmax
-            if i > 2 and (states[i-2] == guess).all():
-                guess[3] = tmed
-                #print("Adjusted tchange to mean t")     # Feedback
-            else:
-                #print("Adjusted tchange to maximum t")  # Feedback
-                pass
+        if i > 2 and states[i-2][3] == guess[3]:
+            guess[3] = tmed
+            #print("Adjusted tchange to mean t")     # Feedback
+        else:
+            #print("Adjusted tchange to maximum t")  # Feedback
+            pass
 
         # If solver gets stuck, stick it somewhere random
-        if i > 2 and (states[i-2] == guess).all():
+        if i > 1 and (np.abs(states[i-1] - guess) <= tolerance).all():
             guess[2] = np.random.rand()*(Lmax-Lmin) + Lmin
             guess[3] = np.random.rand()*(tmax-tmin) + tmin
             #print("Solver got stuck: randomized guess.")# Feedback
@@ -638,11 +640,11 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
         errors[i] = np.sum([err**2 for err in F(guess)])
         states[i] = guess # Record point in case no solution is found
         #print("SSE: ", errors[i])                       # Feedback
-        # print("State record: \n", states[i], "\n", states[i-1], "\n", states[i-2]) # Feedback
+        #print("State record: \n", states[i], "\n", states[i-1], "\n", states[i-2]) # Feedback
         #print()                                         # Feedback
         
         # Evaluate if change is small enough to end loop early
-        if errors[i] < tolerance:
+        if i > 0 and errors[i] < tolerance:
             break # Tolerance met: end loop
 
         # Throw warning if max iterations is exceeded
@@ -668,6 +670,24 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
             else:
                 warnings.warn("NewtonSolve did not fully converge, using case with lowest identified SSE.")
             break
+
+    if saveSolverStates:
+        # Define the folder and file paths
+        folder_name = "solver_data"
+        folder_path = os.path.join(os.getcwd(), folder_name)
+        subfolder_name = datetime.now().strftime("%Y%m%d")
+        subfolder_path = os.path.join(folder_path, subfolder_name)
+        file_name = f"Xim_{xim}_Xiv_{xiv}_h_{hgoal:.4g}_c_{cgoal:.4g}.txt"
+        file_path = os.path.join(subfolder_path, file_name)
+
+        # Check if the folder exists, and create it if it doesn't
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+        if not os.path.exists(subfolder_path):
+            os.makedirs(subfolder_path)
+
+        # Save the data as a text file in the folder
+        np.savetxt(file_path, np.hstack((states[0:i], np.array([errors[0:i]]).T)))
 
     # Store solution to use as initial guess next time
     np.savetxt("newtonsolve_lastsolution.txt", guess)
@@ -757,9 +777,10 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
             InterpPhi = createInterpolator(table, indices)
             
             # Create function phi(xim, xiv, h, c)
-            def phi_table(xim, xiv, h, c, maxIter = 100):
+            def phi_table(xim, xiv, h, c, maxIter = 100, saveSolverStates = False, useStoredSolution = True):
                 # Invert from (h, c) to (L, t), then return interpolated value.
-                L, t = Lt_hc_newton(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm, detailedWarn, maxIter)
+                L, t = Lt_hc_newton(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm, detailedWarn, 
+                                    maxIter, saveSolverStates, useStoredSolution)
                 return InterpPhi(xim, xiv, L, t)
     
             phiTables.append(phi_table)      
@@ -797,9 +818,10 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         for i in range(len(phi)-2):
             InterpPhi = createInterpolator(*results[i+2])
             # Create function phi(xim, xiv, h, c)
-            def phi_table(xim, xiv, h, c, maxIter:int = 100):
+            def phi_table(xim, xiv, h, c, maxIter:int = 100, saveSolverStates = False, useStoredSolution = True):
                 # Invert from (h, c) to (L, t)
-                L, t = Lt_hc_newton(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm, detailedWarn, maxIter)
+                L, t = Lt_hc_newton(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm, detailedWarn, 
+                                    maxIter, saveSolverStates, useStoredSolution)
                 return InterpPhi(xim, xiv, L, t)
     
             phiTables.append(phi_table) 
