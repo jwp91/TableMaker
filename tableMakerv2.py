@@ -10,6 +10,7 @@ from statistics import variance
 import LiuInt as LI # Package with functions for integrating over the BPDF, parameterized by xi_avg and xi_variance
 from scipy.interpolate import RegularGridInterpolator as rgi
 from datetime import datetime
+import multiprocessing as mp
 
 ############################## tableMakerv2
 
@@ -795,7 +796,7 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         table_args = [(path_to_flame_data, Lvals, tvals, p, numXim, numXiv, get_data_files_output, c_components, interpKind, file_pattern) for p in phi] # Arguments for each table's creation
 
         # Parallel table creation (should be reviewed)
-        with ProcessPoolExecutor() as executor:
+        with ProcessPoolExecutor(mp_context=mp.get_context('fork')) as executor:
             futures = {executor.submit(create_table, args): idx for idx, args in enumerate(table_args)}
             results = {}
             for future in concurrent.futures.as_completed(futures):
