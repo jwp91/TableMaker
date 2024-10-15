@@ -53,7 +53,8 @@ def computeProgressVariable(data, header, c_components = ['H2', 'H2O', 'CO', 'CO
 
 ##############################
 
-def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2']):
+def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', \
+                   c_components = ['H2', 'H2O', 'CO', 'CO2']):
     """
     Reads and formats data computed by a flame simulation.
     Inputs: 
