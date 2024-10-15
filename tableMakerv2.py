@@ -327,12 +327,12 @@ def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$
 
 ##############################
 
-def createInterpolator(data, inds, method = 'linear'):
+def createInterpolator(data, inds, interpKind = 'linear'):
     """
     Creates an interpolator using RegularGridInterpolator (rgi).
     Inputs:
         data, inds =  table and indices created by makeLookupTable
-        method = interpolation method that RegularGridInterpolator should use. Default = 'linear'
+        interpKind = interpolation method that RegularGridInterpolator should use. Default = 'linear'
     The returned function is called with func(xim, xiv, L, t)
     """
     xi_means = inds[0]
@@ -340,7 +340,7 @@ def createInterpolator(data, inds, method = 'linear'):
     Ls = inds[2]
     ts = inds[3]
 
-    interpolator = rgi((xi_means, xi_vars, Ls, ts), data, method = method)
+    interpolator = rgi((xi_means, xi_vars, Ls, ts), data, method = interpKind)
 
     def func(xim, xiv, L, t):
         # Function returned to the user.
@@ -701,7 +701,9 @@ def create_table(args):
     """
     # Generic table-generating function
     path, Lvals, tvals, phi, numXim, numXiv, data_output_old, c_components, interpKind, file_pattern = args
-    return makeLookupTable(path, Lvals, tvals, phi=phi, numXim = numXim, numXiv = numXiv, get_data_files_output = data_output_old, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+    return makeLookupTable(path, Lvals, tvals, phi=phi, numXim = numXim, numXiv = numXiv,\
+                           get_data_files_output = data_output_old, c_components = c_components,\
+                            interpKind = interpKind, file_pattern = file_pattern)
 
 def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
              phi = 'T', interpKind = 'cubic', numXim:int=5, numXiv:int = 5, get_data_files_output = None, 
@@ -760,22 +762,28 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
     # ------------ Compute tables, parallel or serial
     if not parallel: # Serial computation
         # Create h & c tables
-        h_table, h_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='h', numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
-        c_table, c_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='c', numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+        h_table, h_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='h', numXim = numXim, \
+                                             numXiv = numXiv, get_data_files_output = data_output, \
+                                                c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+        c_table, c_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='c', numXim = numXim, \
+                                             numXiv = numXiv, get_data_files_output = data_output, \
+                                                c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
     
         # Create h & c interpolators
-        Ih = createInterpolator(h_table, h_indices, method = 'linear') #These should only be set to cubic with a very dense table.
-        Ic = createInterpolator(c_table, c_indices, method = 'linear')
+        Ih = createInterpolator(h_table, h_indices, interpKind = 'linear') #These should only be set to cubic with a very dense table.
+        Ic = createInterpolator(c_table, c_indices, interpKind = 'linear')
     
         # Create array containing phi tables
         norm = np.max(h_table)/np.max(c_table)
         phiTables = []
         for p in phi:
             # Get base table with phi data
-            table, indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi = p, numXim = numXim, numXiv = numXiv, get_data_files_output = data_output, c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+            table, indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi = p, numXim = numXim, \
+                                             numXiv = numXiv, get_data_files_output = data_output, \
+                                                c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
     
             # Create interpolator for phi
-            InterpPhi = createInterpolator(table, indices)
+            InterpPhi = createInterpolator(table, indices, interpKind = 'linear')
             
             # Create function phi(xim, xiv, h, c)
             def phi_table(xim, xiv, h, c, maxIter = 100, saveSolverStates = False, useStoredSolution = True):
@@ -793,7 +801,8 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         import concurrent
 
         phi = np.append(np.array(['h', 'c']), np.array(phi)) # Need to create h and c tables too, so add them  at the beginning. 
-        table_args = [(path_to_flame_data, Lvals, tvals, p, numXim, numXiv, get_data_files_output, c_components, interpKind, file_pattern) for p in phi] # Arguments for each table's creation
+        table_args = [(path_to_flame_data, Lvals, tvals, p, numXim, numXiv, get_data_files_output, \
+                       c_components, interpKind, file_pattern) for p in phi] # Arguments for each table's creation
 
         # Parallel table creation (should be reviewed)
         with ProcessPoolExecutor(mp_context=mp.get_context('fork')) as executor:
@@ -807,8 +816,8 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
                     print(f"Table creation for index {idx} (phi = {phi[idx]}) generated an exception: {e}")
 
         # Create h & c interpolators -- These should only be set to cubic interpolation with a very dense table.
-        Ih = createInterpolator(results[0][0], results[0][1], method = 'linear')
-        Ic = createInterpolator(results[1][0], results[1][1], method = 'linear')
+        Ih = createInterpolator(results[0][0], results[0][1], interpKind = 'linear')
+        Ic = createInterpolator(results[1][0], results[1][1], interpKind = 'linear')
         
         phiTables = []
         norm = np.max(results[0][0])/np.max(results[1][0])
