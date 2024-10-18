@@ -544,7 +544,7 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
             tchange = tchange[0]
 
         # Relax solver: don't allow changes more than a certain fraction of the total domain
-        maxFrac = 0.2*xim if xim > 0.055 else 0.01 # Maximum allowable %change relative to the domain
+        maxFrac = 0.1*xim if xim > 0.1 else 0.01 # Maximum allowable %change relative to the domain
         Lrange = np.abs(max(Lbounds) - min(Lbounds))
         trange = np.abs(max(tbounds) - min(tbounds))
         if Lchange != 0:
@@ -578,7 +578,7 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
         guess   = [xim, xiv, Lmed, tmed]
 
     # Solve parameters
-    tolerance = 1e-8  # Minimum SSE for solver to terminate
+    tolerance = 1e-8  # Minimum SSE for solver to terminate. This was arbitrarily set to a "low" number.
     states = np.tile(guess, (maxIter, 1))
     errors = np.ones(maxIter)
     Lmin = Lbounds[0]+1e-6
@@ -596,48 +596,27 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
         guess -= change
 
         # Enforce bounds
-        # Note: if the new point is out of bounds, it will first correct the solver to a point very close to the boundary. 
-        #       If the point has been sitting at the boundary for 2 iterations, it will replace it to the median point of the domain. 
-        #       Ideally, this prevents the solver from getting stuck at a boundary and will increase the number of states it can probe.
+        #     If the new point is out of bounds, it will first correct the solver to a point very close to the boundary. 
         if guess[2] <= Lbounds[0]:
             guess[2] = Lmin
-        if i > 2 and states[i-2][2] == guess[2]:
-            guess[2] = Lmed
-            #print("Adjusted Lchange to mean L")    # Feedback
-        else:
-            #print("Adjusted Lchange to minimum L") # Feedback
-            pass
-        if guess[2] >= Lbounds[1]:
+        elif guess[2] >= Lbounds[1]:
             guess[2] = Lmax
-        if i > 2 and states[i-2][2] == guess[2]:
-            guess[2] = Lmed
-            #print("Adjusted Lchange to mean L")     # Feedback
-        else:
-            #print("Adjusted Lchange to maximum L")  # Feedback
-            pass
         if guess[3] <= tbounds[0]:
             guess[3] = tmin
-        if i > 2 and states[i-2][3] == guess[3]:
-            guess[3] = tmed
-            #print("Adjusted tchange to mean t")     # Feedback
-        else:
-            #print("Adjusted tchange to minimum t")  # Feedback
-            pass
-        if guess[3] >= tbounds[1]:
+        elif guess[3] >= tbounds[1]:
             guess[3] = tmax
-        if i > 2 and states[i-2][3] == guess[3]:
-            guess[3] = tmed
-            #print("Adjusted tchange to mean t")     # Feedback
-        else:
-            #print("Adjusted tchange to maximum t")  # Feedback
-            pass
 
         # If solver gets stuck, stick it somewhere random
         if i > 1 and (np.abs(states[i-1] - guess) <= tolerance).all():
             guess[2] = np.random.rand()*(Lmax-Lmin) + Lmin
             guess[3] = np.random.rand()*(tmax-tmin) + tmin
             #print("Solver got stuck: randomized guess.")# Feedback
-                
+        elif i > 2 and (np.abs(states[i-2] - guess) <= tolerance).all():
+            # Looks back 2 iterations for basic periodic handling.
+            guess[2] = np.random.rand()*(Lmax-Lmin) + Lmin
+            guess[3] = np.random.rand()*(tmax-tmin) + tmin
+            #print("Solver got stuck: randomized guess.")# Feedback
+        
         # Compute SSE for this point
         errors[i] = np.sum([err**2 for err in F(guess)])
         states[i] = guess # Record point in case no solution is found
