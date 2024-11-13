@@ -2,7 +2,7 @@ import numpy as np
 from scipy.special import gamma
 from scipy.integrate import quad
 
-def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1):
+def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1, silence:bool = False):
     """
     Function for calculating ϕ_avg for a given ξ_avg and ξ_variance. 
     Parameters:
@@ -17,7 +17,9 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1):
             *Reference: Liu et. al, July 2002, "A robust and..." [ https://www.sciencedirect.com/science/article/abs/pii/S1290072902013704 ]
         low: lower bound for integration. Will be zero in most applications
         upp: upper bound for integration. Will be one in most applications
+        silence: bool; if set to True, no warnings will be printed
     """
+    print("------------------New Call-----------------")
     if(type(ϕ)==int):
         return ϕ              # Avoids casting error if ϕ(ξ) is a constant
     #--------- Function to be integrated: ϕ(ξ)*P(ξ; ξm, ξv)
@@ -32,10 +34,12 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1):
     #Note: if ξm is numerically zero or one, the variance must be zero:
     if ξm == 0 and ξv != 0:
         ξv = 0
-        print(f"LiuInt Error: ξv must be zero because ξm==0. ξv inputted = {ξv}")
+        if not silence:
+            print(f"LiuInt Error: ξv must be zero because ξm==0. ξv inputted = {ξv}, corrected to 0")
     if ξm == 1 and ξv != 0:
         ξv = 0
-        print(f"LiuInt Error: ξv must be zero because ξm==1. ξv inputted = {ξv}")
+        if not silence:
+            print(f"LiuInt Error: ξv must be zero because ξm==1. ξv inputted = {ξv}, corrected to 0")
 
     #Treating ξv boundary conditions:
     if ξv == 0:
@@ -55,26 +59,46 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1):
     zero = 1e-8
     if a <= zero:
         a = zero
-        print(f"LiuInt Warning: 'a' computed to be zero. Corrected to {zero}")
+        if not silence:
+            print(f"LiuInt Warning: 'a' computed to be zero. Corrected to {zero}")
     if b <= zero:
         b = zero
-        print(f"LiuInt Warning: 'b' computed to be zero. Corrected to {zero}")
+        if not silence:
+            print(f"LiuInt Warning: 'b' computed to be zero. Corrected to {zero}")
 
-    # Handle very large a and b (Liu 767)
-    if a > 500 and a >= b:
-        # Limit value of a
-        fmax = 1/(1 + (b - 1)/(a - 1))
-        a = 500
-        b = (a - 1 - fmax*(a - 2))/fmax
-        norm = ϵ**a/a + quad(P, ϵ, 1-ϵ, args = (a, b))[0] + ϵ**b/b
-    elif b > 500 and b >= a:
-        # Limit value of b
-        fmax = 1/(1 + (b - 1)/(a - 1))
-        b = 500
-        a = (1 + fmax*(b - 2))/(1 - fmax)
-        norm = ϵ**a/a + quad(P, ϵ, 1-ϵ, args = (a, b))[0] + ϵ**b/b
+    def stirlingNorm(a, b):
+        """Computes the value of gamma(a+b)/gamma(a)/gamma(b) using Stirling's Approximation.
+        scipy.special.gamma(n) overflows when n ~>= 170
+        In contrast, this function overflows when n ~>= 1200
+            In the context of this function, n = a+b.
+        """
+        q = (a+b-0.5)*np.log(a+b) - 0.5*np.log(2*np.pi) - (a-0.5)*np.log(a) - (b-0.5)*np.log(b)
+        return np.exp(q)
+    
+    if a+b<=170:
+        norm = gamma(a+b)/gamma(a)/gamma(b)
+    elif a+b<=1000:
+        norm = stirlingNorm(a, b)  # Normalization factor for BPDF
     else:
-        norm = gamma(a+b)/gamma(a)/gamma(b)   # Normalizes PDF to integrate to 1
+        # Handle very large a and b (Liu 767)
+        if a > 500 and a >= b:
+            # Limit value of a
+            fmax = 1/(1 + (b - 1)/(a - 1))
+            a = 500
+            b = (a - 1 - fmax*(a - 2))/fmax
+            norm = ϵ**a/a + quad(P, ϵ, 1-ϵ, args = (a, b))[0] + ϵ**b/b
+        elif b > 500 and b >= a:
+            # Limit value of b
+            fmax = 1/(1 + (b - 1)/(a - 1))
+            b = 500
+            a = (1 + fmax*(b - 2))/(1 - fmax)
+            norm = ϵ**a/a + quad(P, ϵ, 1-ϵ, args = (a, b))[0] + ϵ**b/b
+        else:
+            raise ValueError(f"""LiuInt: normalization factor could not be computed.
+a  = {a}
+b  = {b}
+ξm = {ξm}
+ξv = {ξv}""")   
     
 
     #--------- Correction for boundary singularity (Liu 767). Utilizes the fact that ϕ(0) and ϕ(1) are known at the endpoints.
@@ -126,16 +150,21 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1):
         p3 = p3*(upp-low)/ϵ
 
     # DEBUGGING
-    if np.isnan(p1) or np.isnan(p2) or np.isnan(p3) or np.isnan(norm):
-        print("ERROR: returned value is nan. Details:")
-        print(f"p1 = {p1}, p2 = {p2}, p3 = {p3}")
-        print(f"xim = {ξm}, xiv = {ξv}, a = {a}, b = {b}")
-        print(f"norm = {norm}")
     if np.isnan((p1+p2+p3)*norm):
         print("ERROR: returned value is nan. Details:")
         print(f"p1 = {p1}, p2 = {p2}, p3 = {p3}")
         print(f"xim = {ξm}, xiv = {ξv}, a = {a}, b = {b}")
         print(f"norm = {norm}")
+
+    print(f"""
+
+LIUINT:
+          a  = {a}
+          b  = {b}
+          p1 = {p1}
+          p2 = {p2}
+          p3 = {p3}
+          norm = {norm}""")
     return (p1+p2+p3)*norm        # Normalizes the βPDF integration before returning.
 
 def βPdf(ξ, ξm, ξv, ϵ = 1e-6):

@@ -171,36 +171,36 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', \
 def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
              phi = 'T', Lt = False, mix_frac_name = "mixf", interpKind = 'cubic', get_data_files_output = None):
     """
-    Returns an array of interpolated functions phi(ξ) where phi is any property of the flame.
-    Inputs:
-        path_to_data = path to simulation data relative to the current folder. 
-            NOTE: The data headers must be the last commented line before the data begins.
-            The code found at https://github.com/BYUignite/flame was used in testing. 
-        Each file will have been run under an array of conditions L,t:
-        Lvals: values of parameter L used, formatted as a list (ex. [ 0.002, 0.02, 0.2])
-        tvals: values of parameter t used, formatted as a list (ex. [ 0    , 1   , 2  ])
-        file_pattern = regular expression (regex) to identify which files in the target folder are data files. 
-            DEFAULT: r'^L.*.dat$'. This grabs any files that begin with "L" and end with ".dat". 
-        c_components = list defining which components' mixture fractions are included in the progress variable. 
-            By default, this is set to be ['H2', 'H2O', 'CO', 'CO2']
-        phi = desired property (ex. 'T', 'rho', etc.), case sensitive. Default = 'T'
-            Available phi are viewable using "get_data_files(params)[1]".
-            NOTE: c (progress variable) is available in the data. By default, c ≡ y_CO2 + y_CO + y_H2O + yH2. 
-            This definition can be changed by modifying the c_components parameter.
-        Lt = Tuple with values of L and t. If set to False (default), the output will be an array of the functions phi(ξ) for all datafiles. 
-             Otherwise, this parameter determines which specific file should be used. 
-             Example1: phiFuncs(path, phi = 'T', Lt = (0,1)): returns the interpolated T(ξ) function ONLY from the data in the file from Lvals[0], tvals[1]. 
-             Example2: phiFuncs(path, phi = 'T'): returns an array containing the interpolated T(ξ) functions from every file in the directory
-             Note that the values in this tuple are not values of L and t, but rather indexes of Lvals and tvals.
-        mix_frac_name = name of the column header for mixture fraction. Default value: "mixf"
-        interpKind = specifies the method of interpolation that should be used (uses scipy.interp1d). Default = 'cubic'. 
-        get_data_files_output = used to save time in the event that multiple tables are to be constructed. 
-            This should be the output of get_data_files, run with the relevant parameters matching those passed in to this function.
+    Returns an array of interpolated functions phi(ξ) where phi is any property of the flame.\n
+    Inputs:\n
+        path_to_data = path to simulation data relative to the current folder. \n
+            NOTE: The data headers must be the last commented line before the data begins.\n
+            The code found at https://github.com/BYUignite/flame was used in testing. \n
+        Each file will have been run under an array of conditions L,t:\n
+        Lvals: values of parameter L used, formatted as a list (ex. [ 0.002, 0.02, 0.2])\n
+        tvals: values of parameter t used, formatted as a list (ex. [ 0    , 1   , 2  ])\n
+        file_pattern = regular expression (regex) to identify which files in the target folder are data files. \n
+            DEFAULT: r'^L.*.dat$'. This grabs any files that begin with "L" and end with ".dat". \n
+        c_components = list defining which components' mixture fractions are included in the progress variable.\n 
+            By default, this is set to be ['H2', 'H2O', 'CO', 'CO2']\n
+        phi = desired property (ex. 'T', 'rho', etc.), case sensitive. Default = 'T'\n
+            Available phi are viewable using "get_data_files(params)[1]".\n
+            NOTE: c (progress variable) is available in the data. By default, c ≡ y_CO2 + y_CO + y_H2O + yH2. \n
+            This definition can be changed by modifying the c_components parameter.\n
+        Lt = Tuple with indices corresponding to the desired L and t. If set to False (default), the output will be an array of the functions phi(ξ) for all datafiles. \n
+             Otherwise, this parameter determines which specific file should be used. \n
+             Example1: phiFuncs(path, phi = 'T', Lt = (0,1)): returns the interpolated T(ξ) function ONLY from the data in the file from Lvals[0], tvals[1]. \n
+             Example2: phiFuncs(path, phi = 'T'): returns an array containing the interpolated T(ξ) functions from every file in the directory\n
+             Note that the values in this tuple are not values of L and t, but rather indexes of Lvals and tvals.\n
+        mix_frac_name = name of the column header for mixture fraction. Default value: "mixf"\n
+        interpKind = specifies the method of interpolation that should be used (uses scipy.interp1d). Default = 'cubic'. \n
+        get_data_files_output = used to save time in the event that multiple tables are to be constructed. \n
+            This should be the output of get_data_files, run with the relevant parameters matching those passed in to this function.\n
         
-    Outputs:
-        The output type of phiFuncs will depend on the input parameter "fileName":
-             - If Lt is not defined (default), the output will be an array of functions.
-             - If Lt is specified, the output will be the function for the specified file only. 
+    Outputs:\n
+        The output type of phiFuncs will depend on the input parameter "fileName":\n
+             - If Lt is not defined (default), the output will be an array of functions.\n
+             - If Lt is specified, the output will be the function for the specified file only. \n
     """
     #---------- Import data, files, and headers
     if get_data_files_output == None:
