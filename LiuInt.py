@@ -19,7 +19,6 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1, silence:bool =
         upp: upper bound for integration. Will be one in most applications
         silence: bool; if set to True, no warnings will be printed
     """
-    print("------------------New Call-----------------")
     if(type(ϕ)==int):
         return ϕ              # Avoids casting error if ϕ(ξ) is a constant
     #--------- Function to be integrated: ϕ(ξ)*P(ξ; ξm, ξv)
@@ -75,39 +74,58 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1, silence:bool =
         q = (a+b-0.5)*np.log(a+b) - 0.5*np.log(2*np.pi) - (a-0.5)*np.log(a) - (b-0.5)*np.log(b)
         return np.exp(q)
     
-    if a+b<=170:
-        norm = gamma(a+b)/gamma(a)/gamma(b)
+    if a+b<=171:
+        # Within scipy.special.gamma's tolerance
+        norm = gamma(a+b)/gamma(a)/gamma(b) # Normalization factor for BPDF
     elif a+b<=1000:
+        # Within Stirling's Approximation's tolerance
         norm = stirlingNorm(a, b)  # Normalization factor for BPDF
+    elif a < 1 or b < 1:
+        # Handle boundary singularity from a or b < 1 (Liu 767)
+        normDen = ϵ**a/a + quad(P, ϵ, 1-ϵ, args = (a, b), points = [ϵ*1.01,1-ϵ*1.01])[0] + ϵ**b/b
+        if normDen == 0 or normDen == np.inf:
+            # This means that the probability density function has gotten as close to two delta functions as 
+            # these approximations can tolerate.
+            return (1-ξm)*ϕ(0) + ξm*ϕ(1) 
+        else:
+            norm = 1/normDen
     else:
-        # Handle very large a and b (Liu 767)
-        if a > 500 and a >= b:
+        # Handle very large a or b (Liu 767)
+        fmax = 1/(1 + (b - 1)/(a - 1))
+        if a > 500 and a>= b:
             # Limit value of a
-            fmax = 1/(1 + (b - 1)/(a - 1))
             a = 500
             b = (a - 1 - fmax*(a - 2))/fmax
-            norm = ϵ**a/a + quad(P, ϵ, 1-ϵ, args = (a, b))[0] + ϵ**b/b
         elif b > 500 and b >= a:
             # Limit value of b
-            fmax = 1/(1 + (b - 1)/(a - 1))
             b = 500
             a = (1 + fmax*(b - 2))/(1 - fmax)
-            norm = ϵ**a/a + quad(P, ϵ, 1-ϵ, args = (a, b))[0] + ϵ**b/b
         else:
-            raise ValueError(f"""LiuInt: normalization factor could not be computed.
-a  = {a}
-b  = {b}
-ξm = {ξm}
-ξv = {ξv}""")   
+            # The code shouldn't get to here
+            raise ValueError(f"""LiuInt Err1: normalization factor could not be computed.
+                             a  = {a}
+                             b  = {b}
+                             ξm = {ξm}
+                             ξv = {ξv}""")
+        if a+b<=171:
+            # Within scipy.special.gamma's tolerance
+            norm = gamma(a+b)/gamma(a)/gamma(b) # Normalization factor for BPDF
+        elif a+b<=1000:
+            # Within Stirling's Approximation's tolerance
+            norm = stirlingNorm(a, b)  # Normalization factor for BPD
+        else:
+            # This likely means that the probability density function has gotten as close to a delta function as 
+            # these approximations can tolerate. At this point, ignore the variance and return the property
+            # evaluated at the mean. This happens at extremely low variances (xiv < 1e-309)
+            return ϕ(ξm)
     
-
     #--------- Correction for boundary singularity (Liu 767). Utilizes the fact that ϕ(0) and ϕ(1) are known at the endpoints.
     ϕ0 = ϕ(0)
     ϕ1 = ϕ(1)
     
     #--------- BASE CODE
     p1 = ϕ0*(ϵ**a)/a                          # 0   < ξ < ϵ
-    p2 = quad(ϕP, ϵ, 1-ϵ, args = (a, b))[0]   # ϵ   < ξ < 1-ϵ
+    p2 = quad(ϕP, ϵ, 1-ϵ, args = (a, b), points = [ξm,])[0]   # ϵ   < ξ < 1-ϵ
     p3 = ϕ1*(ϵ**b)/b                          # 1-ϵ < ξ < ϵ
     
     #--------- Conditionals to handle instances where bounds are not (0,1)
@@ -156,15 +174,6 @@ b  = {b}
         print(f"xim = {ξm}, xiv = {ξv}, a = {a}, b = {b}")
         print(f"norm = {norm}")
 
-    print(f"""
-
-LIUINT:
-          a  = {a}
-          b  = {b}
-          p1 = {p1}
-          p2 = {p2}
-          p3 = {p3}
-          norm = {norm}""")
     return (p1+p2+p3)*norm        # Normalizes the βPDF integration before returning.
 
 def βPdf(ξ, ξm, ξv, ϵ = 1e-6):

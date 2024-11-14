@@ -35,12 +35,9 @@ def computeProgressVariable(data, header, c_components = ['H2', 'H2O', 'CO', 'CO
                 indices[y] = int(i)             # Indices must be strictly integers (ex. 5, not 5.0)
                 
     # Confirm all indices were located
-    allFound = True
     for j, ind in enumerate(indices):
         if ind == -1:
-            allFound = False
             raise ValueError(f"No match found for {c_components[j]}.")
-            return None
 
     #---------- Compute progress variable
     c = np.zeros(len(data[0]))        # Initialize c array
