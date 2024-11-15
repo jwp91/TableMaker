@@ -268,7 +268,10 @@ def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
 ##############################
     
 def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
-                    phi = 'T', interpKind = 'cubic', numXim:int=5, numXiv:int = 5, get_data_files_output = None):
+                    phi = 'T', interpKind = 'cubic', numXim:int=5, numXiv:int = 5, get_data_files_output = None,
+                    ximLfrac = 0.5, ximGfrac = 0.5):
+    # NOTE: arguments later on unpack args for this function using *args. Only add parameters to the end of the
+    # current list of parameters. If removing parameters, be sure to revise calls of this function later in the code.
     """
     Creates a 4D lookup table of phi_avg data. Axis are ξm, ξv, L (length scale), and t (time scale). 
     Inputs:
@@ -287,9 +290,13 @@ def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$
             NOTE: c (progress variable) is available in the data. By default, c ≡ y_CO2 + y_CO + y_H2O + yH2. 
             This definition can be changed by modifying the c_components parameter.
         interpKind = specifies the method of interpolation that should be used (uses scipy.interp1d). Default = 'cubic'. 
+        ximLfrac: fraction of the domain that should contain ximGfrac*100% of the total npoints
         numXim, numXiv: Number of data points between bounds for ξm and ξv, respectively. Default value: 5
         get_data_files_output = used to save time in the event that multiple tables are to be constructed. 
             This should be the output of get_data_files, run with the relevant parameters matching those passed in to this function.
+        ximLfrac: (0 to 1), fraction of the xim domain that should contain ximGfrac of the total numXim points
+        ximGfrac: (0 to 1), fraction of the total numXim points that should fall inside of ximLfrac of the total domain.
+            Example: if ximLfrac = 0.2 and ximGfrac = 0.5, then 50% of the numXim points will fall in the first 20% of the domain.
     """
     if get_data_files_output == None:
         # No processed data passed in: must generate.
@@ -299,7 +306,23 @@ def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$
         funcs = phiFuncs(None, Lvals, tvals, file_pattern = file_pattern, c_components = c_components, phi = phi, interpKind = interpKind, get_data_files_output = get_data_files_output) 
 
     #---------- Create arrays of ξm and ξv
-    Xims = np.linspace(0,1,numXim)      #Xim = Mean mixture fraction.
+    if ximLfrac == ximGfrac:
+        Xims = np.linspace(0,1,numXim)      #Xim = Mean mixture fraction.
+    else:
+        nsteps = numXim-1
+        dx = np.ones(nsteps)/(nsteps)
+        n1 = int(nsteps*ximGfrac)
+        if n1 != 0:
+            dx1 = ximLfrac/n1
+            dx[0:n1] = dx1
+            n2  = nsteps - n1
+            if n2 != 0:
+                dx2 = (1-ximLfrac)/n2
+                dx[n1:] = dx2
+        Xims = np.zeros(numXim)
+        for i in range(len(Xims)-1):
+            Xims[i+1] = Xims[i] + dx[i]
+        Xims[-1] = 1.0
     Xivs = np.linspace(0,1,numXiv)      #Xiv = Mixture fraction variance. Maximum valid Xiv depends on Xim, so we normalize the values to the maximum
     
     #----------- Table Creation
@@ -677,14 +700,11 @@ def create_table(args):
     in the global scope.
     """
     # Generic table-generating function
-    path, Lvals, tvals, phi, numXim, numXiv, data_output_old, c_components, interpKind, file_pattern = args
-    return makeLookupTable(path, Lvals, tvals, phi=phi, numXim = numXim, numXiv = numXiv,\
-                           get_data_files_output = data_output_old, c_components = c_components,\
-                            interpKind = interpKind, file_pattern = file_pattern)
+    return makeLookupTable(*args)
 
 def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
              phi = 'T', interpKind = 'cubic', numXim:int=5, numXiv:int = 5, get_data_files_output = None, 
-             parallel:bool = True, detailedWarn:bool = False):
+             parallel:bool = True, detailedWarn:bool = False, ximLfrac = 0.5, ximGfrac = 0.5):
     """
     Creates a table of phi values in terms of Xim, Xiv, L, t
     Inputs:
@@ -709,6 +729,9 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
             This should be the output of get_data_files, run with the relevant parameters matching those passed in to this function.
         parallel:bool = if set to True (default), the code will attempt to create tables in parallel.
         detailedWarn: If set to true, more detailed warnings will be raised when the solver does not converge. 
+        ximLfrac: (0 to 1), fraction of the xim domain that should contain ximGfrac of the total numXim points
+        ximGfrac: (0 to 1), fraction of the total numXim points that should fall inside of ximLfrac of the total domain.
+            Example: if ximLfrac = 0.2 and ximGfrac = 0.5, then 50% of the numXim points will fall in the first 20% of the domain.
 
     Outputs:
         Array of phi functions phi = phi(xim, xiv, h, c)
@@ -739,12 +762,10 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
     # ------------ Compute tables, parallel or serial
     if not parallel: # Serial computation
         # Create h & c tables
-        h_table, h_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='h', numXim = numXim, \
-                                             numXiv = numXiv, get_data_files_output = data_output, \
-                                                c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
-        c_table, c_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi='c', numXim = numXim, \
-                                             numXiv = numXiv, get_data_files_output = data_output, \
-                                                c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+        h_table, h_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern, c_components,\
+                                             'h', interpKind, numXim, numXiv, data_output, ximLfrac, ximGfrac)
+        c_table, c_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern, c_components,\
+                                             'c', interpKind, numXim, numXiv, data_output, ximLfrac, ximGfrac)
     
         # Create h & c interpolators
         Ih = createInterpolator(h_table, h_indices, interpKind = 'linear') #These should only be set to cubic with a very dense table.
@@ -755,9 +776,8 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         phiTables = []
         for p in phi:
             # Get base table with phi data
-            table, indices = makeLookupTable(path_to_flame_data, Lvals, tvals, phi = p, numXim = numXim, \
-                                             numXiv = numXiv, get_data_files_output = data_output, \
-                                                c_components = c_components, interpKind = interpKind, file_pattern = file_pattern)
+            table, indices = makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern, c_components,\
+                                             p, interpKind, numXim, numXiv, data_output, ximLfrac, ximGfrac)
     
             # Create interpolator for phi
             InterpPhi = createInterpolator(table, indices, interpKind = 'linear')
@@ -778,8 +798,8 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         import concurrent
 
         phi = np.append(np.array(['h', 'c']), np.array(phi)) # Need to create h and c tables too, so add them  at the beginning. 
-        table_args = [(path_to_flame_data, Lvals, tvals, p, numXim, numXiv, get_data_files_output, \
-                       c_components, interpKind, file_pattern) for p in phi] # Arguments for each table's creation
+        table_args = [(path_to_flame_data, Lvals, tvals, file_pattern, c_components, p, interpKind, numXim, 
+                       numXiv, data_output, ximLfrac, ximGfrac) for p in phi] # Arguments for each table's creation
 
         # Parallel table creation (should be reviewed)
         with ProcessPoolExecutor(mp_context=mp.get_context('fork')) as executor:
