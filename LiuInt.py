@@ -176,7 +176,7 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1, silence:bool =
 
     return (p1+p2+p3)*norm        # Normalizes the βPDF integration before returning.
 
-def βPdf(ξ, ξm, ξv, ϵ = 1e-6):
+def bPdf(ξ, ξm, ξv, ϵ = 1e-6):
     """
     Calculates P(ξ) according to the Beta PDF
     Parameters:
@@ -189,6 +189,10 @@ def βPdf(ξ, ξm, ξv, ϵ = 1e-6):
                 * The lowest variance this allows is a ξv of 3.7e-6 (occurs at ξm = 0.33337)
             *Reference: Liu et. al, July 2002, "A robust and..." [ https://www.sciencedirect.com/science/article/abs/pii/S1290072902013704 ]
     """
+    def P(ξ, a, b):
+        P = ξ**(a-1) * (1-ξ)**(b-1)       # βPDF, non-normalized
+        return P
+    
     zero = ϵ #Parameter to avoid divide by zero errors
     if ξm == 0:
         ξm = ϵ
@@ -199,7 +203,69 @@ def βPdf(ξ, ξm, ξv, ϵ = 1e-6):
     
     np.seterr(divide='ignore')           # Disables ZeroDivisionError for when ξ = 0 or 1
     
-    P = ξ**(a-1) * (1-ξ)**(b-1) * gamma(a+b)/gamma(a)/gamma(b)
+    # Calculate parameters
+    a = ( ξm*(1-ξm)/ξv - 1 )*ξm
+    b = ( ξm*(1-ξm)/ξv - 1 )*(1-ξm)
+
+    # Avoid βPDF singularities. This block shouldn't execute, hence the print statements for debugging. 
+    zero = 1e-8
+    if a <= zero:
+        a = zero
+    if b <= zero:
+        b = zero
+
+    def stirlingNorm(a, b):
+        """Computes the value of gamma(a+b)/gamma(a)/gamma(b) using Stirling's Approximation.
+        scipy.special.gamma(n) overflows when n ~>= 170
+        In contrast, this function overflows when n ~>= 1200
+            In the context of this function, n = a+b.
+        """
+        q = (a+b-0.5)*np.log(a+b) - 0.5*np.log(2*np.pi) - (a-0.5)*np.log(a) - (b-0.5)*np.log(b)
+        return np.exp(q)
+    
+    if a+b<=171:
+        # Within scipy.special.gamma's tolerance
+        norm = gamma(a+b)/gamma(a)/gamma(b) # Normalization factor for BPDF
+    elif a+b<=1000:
+        # Within Stirling's Approximation's tolerance
+        norm = stirlingNorm(a, b)  # Normalization factor for BPDF
+    elif a < 1 or b < 1:
+        # Handle boundary singularity from a or b < 1 (Liu 767)
+        normDen = ϵ**a/a + quad(P, ϵ, 1-ϵ, args = (a, b), points = [ϵ*1.01,1-ϵ*1.01])[0] + ϵ**b/b
+        if normDen == 0 or normDen == np.inf:
+            # This means that the probability density function has gotten as close to two delta functions as 
+            # these approximations can tolerate.
+            return (1-ξm)*ϕ(0) + ξm*ϕ(1) 
+        else:
+            norm = 1/normDen
+    else:
+        # Handle very large a or b (Liu 767)
+        fmax = 1/(1 + (b - 1)/(a - 1))
+        if a > 500 and a>= b:
+            # Limit value of a
+            a = 500
+            b = (a - 1 - fmax*(a - 2))/fmax
+        elif b > 500 and b >= a:
+            # Limit value of b
+            b = 500
+            a = (1 + fmax*(b - 2))/(1 - fmax)
+        else:
+            # The code shouldn't get to here
+            raise ValueError(f"""LiuInt Err1: normalization factor could not be computed.
+                             a  = {a}
+                             b  = {b}
+                             ξm = {ξm}
+                             ξv = {ξv}""")
+        if a+b<=171:
+            # Within scipy.special.gamma's tolerance
+            norm = gamma(a+b)/gamma(a)/gamma(b) # Normalization factor for BPDF
+        elif a+b<=1000:
+            # Within Stirling's Approximation's tolerance
+            norm = stirlingNorm(a, b)  # Normalization factor for BPD
+        else:
+            return 1
+        
+    P = ξ**(a-1) * (1-ξ)**(b-1) * norm
         
     return P
 
@@ -269,7 +335,7 @@ def example():
     ax1.set_xlabel("ξ")
     ax1.set_ylabel("T (K)")
     
-    ax2.plot(ξ, βPdf(ξ, ξm, ξv), '--', color = 'darkviolet', label = f"βPdf(ξm={ξm}, ξv={ξv})")
+    ax2.plot(ξ, bPdf(ξ, ξm, ξv), '--', color = 'darkviolet', label = f"βPdf(ξm={ξm}, ξv={ξv})")
     ax2.set_ylabel("P(ξ)")
     fig.legend(loc="upper right", bbox_to_anchor=(1,1), bbox_transform=ax1.transAxes);
     

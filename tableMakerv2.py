@@ -564,7 +564,7 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
             tchange = tchange[0]
 
         # Relax solver: don't allow changes more than a certain fraction of the total domain
-        maxFrac = 0.1*xim if xim > 0.1 else 0.01 # Maximum allowable %change relative to the domain
+        maxFrac = 0.2*xim if xim > 0.1 else 0.02 # Maximum allowable %change relative to the domain
         Lrange = np.abs(max(Lbounds) - min(Lbounds))
         trange = np.abs(max(tbounds) - min(tbounds))
         if Lchange != 0:
