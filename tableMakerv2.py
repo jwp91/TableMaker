@@ -88,6 +88,9 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', \
         if match(file_pattern, os.path.basename(file)):
             filenames = np.append(filenames,  os.path.basename(file))
             data_files= np.append(data_files, file)
+    #print(filenames) # DEBUGGING
+    #print(Lvals)     # DEBUGGING
+    #print(tvals)     # DEBUGGING
 
     #---------- Initialize data arrays
     all_data = np.empty((len(Lvals),len(tvals)), dtype=np.ndarray)  # Initialize to grab data values
@@ -102,6 +105,7 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', \
         file = data_files[i]
         with open(file, 'r') as f:
             #---------- Make sure the assigned L and t value are in the file name:
+            #print(f"Desired L,  r = {Lvals[l]}, {tvals[t]} ; Filename = {f.name}") # DEBUGGING
             if str(Lvals[l]) not in f.name:
                 print(f"Warning: for file name '{f.name}', mismatch: L = {Lvals[l]}")
             if str(tvals[t]) not in f.name:
