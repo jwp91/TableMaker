@@ -14,16 +14,16 @@ import multiprocessing as mp
 
 ############################## tableMakerv2
 
-def computeProgressVariable(data, header, c_components = ['H2', 'H2O', 'CO', 'CO2']):
+def compute_progress_variable(data, header, c_components = ['H2', 'H2O', 'CO', 'CO2']):
     """
-    Progress variable is defined as the sum of the mole fractions of a specified set of c_components.
+    Progress variable is defined as the sum of the mass fractions of a specified set of c_components.
     This function computes the flame progress variable using:
         data = Data from a flame simulation. Each row corresponds to a specific property.
             In the case of this package, this data array is "transposed_file_data" inside the function "get_file_data"
                 ex. data[0] = array of temperature data.
         header = 1D array of column headers, denoting which row in "data" corresponds to which property.
             ex. If header[0] = "Temp", then data[0] should be temperature data.
-        c_components = list defining whih components' mixture fractions are included in the progress variable. 
+        c_components = list defining whih components' mass fractions are included in the progress variable. 
             By default, this is set to be ['H2', 'H2O', 'CO', 'CO2']
             The strings in the list should each match a string used in 'header'
     """
@@ -32,7 +32,7 @@ def computeProgressVariable(data, header, c_components = ['H2', 'H2O', 'CO', 'CO
     for i in range(len(header)):                # For each element in the header, 
         for y in range(len(c_components)):      # Check for a match among the passed-in c_components
             if header[i]==c_components[y].replace(" ",""):
-                indices[y] = int(i)             # Indices must be strictly integers (ex. 5, not 5.0)
+                indices[y] = int(i)             # Indices must be strictly integers
                 
     # Confirm all indices were located
     for j, ind in enumerate(indices):
@@ -41,10 +41,10 @@ def computeProgressVariable(data, header, c_components = ['H2', 'H2O', 'CO', 'CO
 
     #---------- Compute progress variable
     c = np.zeros(len(data[0]))        # Initialize c array
-    for d in range(len(data[0])):     # For each set of data points (each column),
+    for d in range(len(data[0])):     # For each column,
         sum = 0
         for index in indices:         # For each of the components specified, 
-            sum += data[index,d]      # Sum the mole fractions of each component
+            sum += data[index,d]      # Sum the mass fractions of each component
         c[d] = sum
     return c 
 
@@ -63,7 +63,7 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', \
         tvals: values of parameter t used, formatted as a list (ex. [ 0    , 1   , 2  ])
         file_pattern = regular expression (regex) to identify which files in the target folder are data files.  
             DEFAULT: r'^L.*.dat$'. This grabs any files that begin with "L" and end with ".dat". 
-        c_components = list defining whih components' mixture fractions are included in the progress variable. 
+        c_components = list defining whih components' mass fractions are included in the progress variable. 
             By default, this is set to be ['H2', 'H2O', 'CO', 'CO2']
             
     Outputs:
@@ -99,6 +99,7 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', \
 
     #---------- Grab and store data
     for i in range(len(data_files)):
+        # This indexing assumes the same # of time scales were run for each length scale
         l = i//len(tvals)   # Row index
         t = i %len(tvals)   # Column index
         
@@ -124,7 +125,7 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', \
                     vals = np.array([val for val in line.strip().split() if val !='#'])
                     if IsHeader == True:
                         for val in vals:
-                            #Remove preemtive numbers in the column labels, then store column label (assumes labels formmatted as colNum_property, e.g. 0_T)
+                            #Remove preemtive numbers in the column labels, then store column label (assumes labels formatted as colNum_property, e.g. 0_T)
                             #This label is used later to select which property to use when creating the table
                             header = np.append(header, val.split("_")[1])  
                         IsHeader = False               #The next line won't be the header, but should be stored in 'extras'
@@ -149,7 +150,7 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', \
         transposed_file_data = file_data.T
 
         #---------- Add a row with progress variable (c)
-        c = computeProgressVariable(transposed_file_data, header, c_components = c_components)
+        c = compute_progress_variable(transposed_file_data, header, c_components = c_components)
         transposed_file_data = np.vstack((transposed_file_data, c))   #Stacks this array of progress variable values as the last row 
         
         #---------- Arrange data by l and t indices
@@ -169,7 +170,7 @@ def get_data_files(path_to_data, Lvals, tvals, file_pattern = r'^L.*.dat$', \
 
 ##############################
 
-def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
+def phi_funcs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
              phi = 'T', Lt = False, mix_frac_name = "mixf", interpKind = 'cubic', get_data_files_output = None):
     """
     Returns an array of interpolated functions phi(ξ) where phi is any property of the flame.\n
@@ -190,8 +191,8 @@ def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
             This definition can be changed by modifying the c_components parameter.\n
         Lt = Tuple with indices corresponding to the desired L and t. If set to False (default), the output will be an array of the functions phi(ξ) for all datafiles. \n
              Otherwise, this parameter determines which specific file should be used. \n
-             Example1: phiFuncs(path, phi = 'T', Lt = (0,1)): returns the interpolated T(ξ) function ONLY from the data in the file from Lvals[0], tvals[1]. \n
-             Example2: phiFuncs(path, phi = 'T'): returns an array containing the interpolated T(ξ) functions from every file in the directory\n
+             Example1: phi_funcs(path, phi = 'T', Lt = (0,1)): returns the interpolated T(ξ) function ONLY from the data in the file from Lvals[0], tvals[1]. \n
+             Example2: phi_funcs(path, phi = 'T'): returns an array containing the interpolated T(ξ) functions from every file in the directory\n
              Note that the values in this tuple are not values of L and t, but rather indexes of Lvals and tvals.\n
         mix_frac_name = name of the column header for mixture fraction. Default value: "mixf"\n
         interpKind = specifies the method of interpolation that should be used (uses scipy.interp1d). Default = 'cubic'. \n
@@ -199,7 +200,7 @@ def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
             This should be the output of get_data_files, run with the relevant parameters matching those passed in to this function.\n
         
     Outputs:\n
-        The output type of phiFuncs will depend on the input parameter "fileName":\n
+        The output type of phi_funcs will depend on the input parameter "fileName":\n
              - If Lt is not defined (default), the output will be an array of functions.\n
              - If Lt is specified, the output will be the function for the specified file only. \n
     """
@@ -246,15 +247,15 @@ def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
         return None
 
     #---------- Interpolate phi(xi)
-    phiFuncs = np.empty((len(Lvals),len(tvals)), dtype=np.ndarray)
+    phi_funcs = np.empty((len(Lvals),len(tvals)), dtype=np.ndarray)
     if Lt == False:
         #User did not specify file: must interpolate for every file
         for l in range(len(data)):
             for t in range(len(data[l])):
                 xis = data[l][t][xi_col]
                 phis = data[l][t][phi_col]
-                phiFuncs[l][t] = interp1d(xis, phis, kind = interpKind)
-        return phiFuncs
+                phi_funcs[l][t] = interp1d(xis, phis, kind = interpKind)
+        return phi_funcs
     else:
         #User specified a file
         xis = data[Lt[0]][Lt[1]][xi_col]
@@ -263,15 +264,15 @@ def phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
 
 ##############################
 
-#----- Testing phiFuncs
+#----- Testing phi_funcs
 # Lvals = [0.002, 0.004, 0.006, 0.008, 0.02, 0.04, 0.2]
 # tvals = np.arange(0,11,1)
-# phiFuncs(path, Lvals, tvals, Lt = (0,1))(0.5)
-# phiFuncs("../flame/run", fileName = 'james')
+# phi_funcs(path, Lvals, tvals, Lt = (0,1))(0.5)
+# phi_funcs("../flame/run", fileName = 'james')
 
 ##############################
     
-def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
+def make_lookup_table(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
                     phi = 'T', interpKind = 'cubic', numXim:int=5, numXiv:int = 5, get_data_files_output = None,
                     ximLfrac = 0.5, ximGfrac = 0.5):
     # NOTE: arguments later on unpack args for this function using *args. Only add parameters to the end of the
@@ -304,10 +305,10 @@ def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$
     """
     if get_data_files_output == None:
         # No processed data passed in: must generate.
-        funcs = phiFuncs(path_to_flame_data, Lvals, tvals, file_pattern = file_pattern, c_components = c_components, phi = phi, interpKind = interpKind, get_data_files_output = get_data_files_output)
+        funcs = phi_funcs(path_to_flame_data, Lvals, tvals, file_pattern = file_pattern, c_components = c_components, phi = phi, interpKind = interpKind, get_data_files_output = get_data_files_output)
     else:
         # Use pre-processed data
-        funcs = phiFuncs(None, Lvals, tvals, file_pattern = file_pattern, c_components = c_components, phi = phi, interpKind = interpKind, get_data_files_output = get_data_files_output) 
+        funcs = phi_funcs(None, Lvals, tvals, file_pattern = file_pattern, c_components = c_components, phi = phi, interpKind = interpKind, get_data_files_output = get_data_files_output) 
 
     #---------- Create arrays of ξm and ξv
     if ximLfrac == ximGfrac:
@@ -352,11 +353,11 @@ def makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$
 
 ##############################
 
-def createInterpolator(data, inds, interpKind = 'linear'):
+def create_interpolator_mvlt(data, inds, interpKind = 'linear'):
     """
     Creates an interpolator using RegularGridInterpolator (rgi).
     Inputs:
-        data, inds =  table and indices created by makeLookupTable
+        data, inds =  table and indices created by make_lookup_table
         interpKind = interpolation method that RegularGridInterpolator should use. Default = 'linear'
     The returned function is called with func(xim, xiv, L, t)
     """
@@ -397,16 +398,16 @@ def createInterpolator(data, inds, interpKind = 'linear'):
     
 ##############################
 
-def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
+def Lt_from_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
     """
-    DEPRECATED: code uses Lt_hc_newton now
+    DEPRECATED: code uses Lt_from_hc_newton now
     Solves for L,t given:
               h: value of enthalpy
               c: value of progress variable
             xim: mean mixture fraction
             xiv: mixture fraction variance
-        hInterp: interpolated function for h(xim, xiv, L, t), created using "createInterpolator"
-        cInterp: interpolated function for c(xim, xiv, L, t), created using "createInterpolator"
+        hInterp: interpolated function for h(xim, xiv, L, t), created using "create_interpolator_mvlt"
+        cInterp: interpolated function for c(xim, xiv, L, t), created using "create_interpolator_mvlt"
         Lbounds: tuple containing the minimum and maximum value of L
         tbounds: tuple contianing the minimum and maximum value of L
         norm   := np.max(h_table)/np.max(c_table). Compensates for the large difference in magnitude between typical h and c values.
@@ -450,7 +451,7 @@ def Lt_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
     print("resids = ", solve(zero))      #DEBUGGING
     return zero
 
-def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds, 
+def Lt_from_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds, 
                  norm, detailedWarn:bool = False, maxIter:int = 100, saveSolverStates:bool = False, 
                  useStoredSolution:bool = True):
     """
@@ -460,8 +461,8 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
           cgoal: value of progress variable
             xim: mean mixture fraction
             xiv: mixture fraction variance
-        hInterp: interpolated function for h(xim, xiv, L, t), created using "createInterpolator"
-        cInterp: interpolated function for c(xim, xiv, L, t), created using "createInterpolator"
+        hInterp: interpolated function for h(xim, xiv, L, t), created using "create_interpolator_mvlt"
+        cInterp: interpolated function for c(xim, xiv, L, t), created using "create_interpolator_mvlt"
         Lbounds: tuple containing the minimum and maximum value of L
         tbounds: tuple contianing the minimum and maximum value of L
         norm   := np.max(h_table)/np.max(c_table). Compensates for the large difference in magnitude between typical h and c values.
@@ -484,7 +485,7 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
         cresid = (cInterp(*mvlt) - cgoal)*norm # norm ensures both h and c are of similar magnitude
         return np.array([hresid, cresid])
     
-    def getJac(F, X0, F0=None):
+    def get_jac(F, X0, F0=None):
         """Computes the 2x2 Jacobian of F(X) at X
         Params:
             F = F(mvlt) = [h(mvlt) - hSet, c(mvlt)-cSet]
@@ -499,7 +500,7 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
         """
         # Confirm X is an array
         X0 = np.array(X0)
-        #print("GetJac initial point: ", X0) #DEGBUGGING
+        #print("get_jac initial point: ", X0) #DEGBUGGING
 
         # Compute F0 if not passed in 
         if F0 is None:
@@ -526,7 +527,7 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
 
         return np.array([J0, J1]).T[0] # Without this final indexing, the shape is (1, 2, 2) instead of (2, 2)
     
-    def cramerSolve(F, X0):
+    def cramer_solve(F, X0):
         """
         Solves the system of equations JX=F(X0) for X using Cramer's rule.
         Params:
@@ -542,7 +543,7 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
 
         # Solve the system
         F0 = F(X0)
-        J = getJac(F, X0, F0)
+        J = get_jac(F, X0, F0)
 
         #print("F0 = ", F0) #DEBUGGING
         #print("J  = ", J, np.array(J).shape)  #DEBUGGING
@@ -616,7 +617,7 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
         #print("Iteration: ", i) # Feedback
         
         # Compute new point
-        change = cramerSolve(F, guess)
+        change = cramer_solve(F, guess)
         guess -= change
 
         # Enforce bounds
@@ -659,7 +660,7 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
             if detailedWarn:
                 warnings.warn(f"""
                             
-                Maximum iterations ({maxIter}) exceeded in Lt_hc_newton solver.
+                Maximum iterations ({maxIter}) exceeded in Lt_from_hc_newton solver.
                 This indicates that the exact queried [xim, xiv, h, c] point was not found in the table.
                 Using best-case computed result:
                     xim = {guess[0]}
@@ -698,19 +699,19 @@ def Lt_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds,
     np.savetxt("newtonsolve_lastsolution.txt", guess)
     return [guess[2], guess[3]]
 
-def create_table(args):
-    """This function is used in phiTable for parallelization. 
+def create_table_aux(args):
+    """Auxiliary function used in phi_mvhc for parallelization. 
     The package used for parallelization ("concurrent") requires that the function being parallelized is defined 
     in the global scope.
     """
     # Generic table-generating function
-    return makeLookupTable(*args)
+    return make_lookup_table(*args)
 
-def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
+def phi_mvhc(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
              phi = 'T', interpKind = 'cubic', numXim:int=5, numXiv:int = 5, get_data_files_output = None, 
              parallel:bool = True, detailedWarn:bool = False, ximLfrac = 0.5, ximGfrac = 0.5):
     """
-    Creates a table of phi values in terms of Xim, Xiv, L, t
+    Creates a table of phi values in terms of Xim, Xiv, h,
     Inputs:
         path_to_flame_data = path to simulation data relative to the current folder. 
             NOTE: The data headers must be the last commented line before the data begins.
@@ -738,8 +739,10 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
             Example: if ximLfrac = 0.2 and ximGfrac = 0.5, then 50% of the numXim points will fall in the first 20% of the domain.
 
     Outputs:
-        Array of phi functions phi = phi(xim, xiv, h, c)
-        NOTE: if only one phi is specified, if will still be returned in a single-element array.
+        phi_mvhc_arr: Array of phi functions phi = phi(xim, xiv, h, c)
+            NOTE: if only one phi is specified, if will still be returned in a single-element array.
+        tableArr: array of [table, indices] for each phi, beginning with h and c.
+
     """
     # ------------ Pre-processing
     # Confirm h and c aren't in phi
@@ -766,35 +769,37 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
     # ------------ Compute tables, parallel or serial
     if not parallel: # Serial computation
         # Create h & c tables
-        h_table, h_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern, c_components,\
+        h_table, h_indices = make_lookup_table(path_to_flame_data, Lvals, tvals, file_pattern, c_components,\
                                              'h', interpKind, numXim, numXiv, data_output, ximLfrac, ximGfrac)
-        c_table, c_indices = makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern, c_components,\
+        c_table, c_indices = make_lookup_table(path_to_flame_data, Lvals, tvals, file_pattern, c_components,\
                                              'c', interpKind, numXim, numXiv, data_output, ximLfrac, ximGfrac)
     
         # Create h & c interpolators
-        Ih = createInterpolator(h_table, h_indices, interpKind = 'linear') #These should only be set to cubic with a very dense table.
-        Ic = createInterpolator(c_table, c_indices, interpKind = 'linear')
+        Ih = create_interpolator_mvlt(h_table, h_indices, interpKind = 'linear') #These should only be set to cubic with a very dense table.
+        Ic = create_interpolator_mvlt(c_table, c_indices, interpKind = 'linear')
     
         # Create array containing phi tables
         norm = np.max(h_table)/np.max(c_table)
-        phiTables = []
+        phi_mvhc_arr = []
+        tableArr = [[h_table, h_indices], [c_table, c_indices]]
         for p in phi:
             # Get base table with phi data
-            table, indices = makeLookupTable(path_to_flame_data, Lvals, tvals, file_pattern, c_components,\
+            table, indices = make_lookup_table(path_to_flame_data, Lvals, tvals, file_pattern, c_components,\
                                              p, interpKind, numXim, numXiv, data_output, ximLfrac, ximGfrac)
     
             # Create interpolator for phi
-            InterpPhi = createInterpolator(table, indices, interpKind = 'linear')
+            InterpPhi = create_interpolator_mvlt(table, indices, interpKind = 'linear')
             
             # Create function phi(xim, xiv, h, c)
             def phi_table(xim, xiv, h, c, maxIter = 100, saveSolverStates = False, useStoredSolution = True):
                 # Invert from (h, c) to (L, t), then return interpolated value.
-                L, t = Lt_hc_newton(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm, detailedWarn, 
+                L, t = Lt_from_hc_newton(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm, detailedWarn, 
                                     maxIter, saveSolverStates, useStoredSolution)
                 return InterpPhi(xim, xiv, L, t)
     
-            phiTables.append(phi_table)      
-        return phiTables
+            phi_mvhc_arr.append(phi_table)
+            tableArr.append([table, indices])
+        return phi_mvhc_arr, tableArr
         
     else: # Parallel computation
         # Import needed packages
@@ -807,7 +812,7 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
 
         # Parallel table creation (should be reviewed)
         with ProcessPoolExecutor(mp_context=mp.get_context('fork')) as executor:
-            futures = {executor.submit(create_table, args): idx for idx, args in enumerate(table_args)}
+            futures = {executor.submit(create_table_aux, args): idx for idx, args in enumerate(table_args)}
             results = {}
             for future in concurrent.futures.as_completed(futures):
                 idx = futures[future]
@@ -817,23 +822,26 @@ def phiTable(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
                     print(f"Table creation for index {idx} (phi = {phi[idx]}) generated an exception: {e}")
 
         # Create h & c interpolators -- These should only be set to cubic interpolation with a very dense table.
-        Ih = createInterpolator(results[0][0], results[0][1], interpKind = 'linear')
-        Ic = createInterpolator(results[1][0], results[1][1], interpKind = 'linear')
+        Ih = create_interpolator_mvlt(results[0][0], results[0][1], interpKind = 'linear')
+        Ic = create_interpolator_mvlt(results[1][0], results[1][1], interpKind = 'linear')
         
-        phiTables = []
+        phi_mvhc_arr = []
+        tableArr = [[results[0][0], results[0][1]], [results[1][0], results[1][1]]] # [[h_table, h_indices], [c_table, c_indices]]
         norm = np.max(results[0][0])/np.max(results[1][0])
         if np.isnan(norm):
             norm = np.average(results[0][0])/np.max(results[1][0])
         if np.isnan(norm):
             norm = 1.0
         for i in range(len(phi)-2):
-            InterpPhi = createInterpolator(*results[i+2])
+            tableI, indsI = results[i+2]
+            InterpPhi = create_interpolator_mvlt(tableI, indsI, interpKind = 'linear')
             # Create function phi(xim, xiv, h, c)
             def phi_table(xim, xiv, h, c, maxIter:int = 100, saveSolverStates = False, useStoredSolution = True):
                 # Invert from (h, c) to (L, t)
-                L, t = Lt_hc_newton(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm, detailedWarn, 
+                L, t = Lt_from_hc_newton(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm, detailedWarn, 
                                     maxIter, saveSolverStates, useStoredSolution)
                 return InterpPhi(xim, xiv, L, t)
-    
-            phiTables.append(phi_table) 
-        return phiTables
+
+            phi_mvhc_arr.append(phi_table) 
+            tableArr.append([tableI, indsI])
+        return phi_mvhc_arr, tableArr
