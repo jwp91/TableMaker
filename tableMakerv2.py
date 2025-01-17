@@ -335,8 +335,7 @@ def make_lookup_table(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.da
     for m in range(len(Xims)):                                               #Loop over each value of ξm
         xim = Xims[m]
         for v in range(len(Xivs)):                                           #Loop over each value of ξv
-            xivMax = xim*(1-xim)
-            xiv = Xivs[v]*xivMax
+            xiv = Xivs[v]*xim*(1-xim)
             for l in range(len(Lvals)):
                 for t in range(len(tvals)):
                     phiAvg = LI.IntegrateForPhiBar(xim, xiv, funcs[l][t])    #Calculates phi_Avg
@@ -392,7 +391,6 @@ def create_interpolator_mvlt(data, inds, interpKind = 'linear'):
             print("Invalid argument passed into interpolator")
             print("Values passed into interpolator: ", xim, xiv_norm, L, t, "( xiv=", xiv, ")") #DEBUGGING
             print(f"Exception raised: {e}")
-
     
     return func
     
@@ -453,7 +451,8 @@ def Lt_from_hc(h, c, xim, xiv, hInterp, cInterp, Lbounds, tbounds, norm):
 
 def Lt_from_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds, 
                  norm, detailedWarn:bool = False, maxIter:int = 100, saveSolverStates:bool = False, 
-                 useStoredSolution:bool = True):
+                 useStoredSolution:bool = True, LstepParams = [0.25, 0.01, 0.003], 
+                 tstepParams = [0.25, 9.5, 0.02]):
     """
     Solves for L,t using a 2D Newton solver.
     Params:
@@ -472,6 +471,14 @@ def Lt_from_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds
         useStoredSolution:bool, if set to False, the solver will not use the last solution as its initial guess. 
             Using the last initial guess (default) is generally good: CFD will solve cell-by-cell, and nearby
             cells are expected to have similar values of phi.
+        LstepParams: array of parameters used to relax the solver
+            LstepParams[0] = 0.25; normal max step size (% of domain)
+            LstepParams[1] = 0.01; threshold value of L, below which the max step size is reduced to
+            LstepParams[2] = 0.003; reduced max step size (% of domain)
+        tstepParams: array of parameters used to relax the solver
+            tstepParams[0] = 0.25; normal max step size (% of domain)
+            tstepParams[1] = 9.5; threshold value of t, above which the max step size is reduced to
+            tstepParams[2] = 0.02; reduced max step size (% of domain)
         
     Returns a tuple of form (L,t)
     This function is to be used for getting values of phi by phi(xim, xiv, [L,t](h,c))
@@ -569,7 +576,9 @@ def Lt_from_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds
             tchange = tchange[0]
 
         # Relax solver: don't allow changes more than a certain fraction of the total domain
-        maxFrac = 0.25 if X0[2]>0.01 else 0.0025 # Maximum allowable %change relative to the domain
+        # TODO: more elegant solution for determining these cutoffs.
+        maxFrac_L = LstepParams[0] if X0[2]>LstepParams[1] else LstepParams[2] # Maximum allowable %change in L relative to the domain
+        maxFrac_t = tstepParams[0] if X0[3]<tstepParams[1] else tstepParams[1] # Maximum allowable %change in L relative to the domain
         Lrange = np.abs(max(Lbounds) - min(Lbounds))
         trange = np.abs(max(tbounds) - min(tbounds))
         if Lchange != 0:
@@ -581,8 +590,8 @@ def Lt_from_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds
         else:
             tsign = 1.0
         
-        Lchange = np.min([np.abs(Lchange), Lrange*maxFrac])*Lsign
-        tchange = np.min([np.abs(tchange), trange*maxFrac])*tsign
+        Lchange = np.min([np.abs(Lchange), Lrange*maxFrac_L])*Lsign
+        tchange = np.min([np.abs(tchange), trange*maxFrac_t])*tsign
         
         #print("Cramer computed change: ", Lchange, tchange) #DEBUGGING
         return np.array([0, 0, Lchange, tchange])
@@ -791,10 +800,11 @@ def phi_mvhc(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
             InterpPhi = create_interpolator_mvlt(table, indices, interpKind = 'linear')
             
             # Create function phi(xim, xiv, h, c)
-            def phi_table(xim, xiv, h, c, maxIter = 100, saveSolverStates = False, useStoredSolution = True):
+            def phi_table(xim, xiv, h, c, maxIter = 100, saveSolverStates = False, useStoredSolution = True, 
+                          LstepParams = [0.25, 0.01, 0.003], tstepParams = [0.25, 9.5, 0.02]):
                 # Invert from (h, c) to (L, t), then return interpolated value.
                 L, t = Lt_from_hc_newton(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm, detailedWarn, 
-                                    maxIter, saveSolverStates, useStoredSolution)
+                                    maxIter, saveSolverStates, useStoredSolution, LstepParams, tstepParams)
                 return InterpPhi(xim, xiv, L, t)
     
             phi_mvhc_arr.append(phi_table)
@@ -836,10 +846,11 @@ def phi_mvhc(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
             tableI, indsI = results[i+2]
             InterpPhi = create_interpolator_mvlt(tableI, indsI, interpKind = 'linear')
             # Create function phi(xim, xiv, h, c)
-            def phi_table(xim, xiv, h, c, maxIter:int = 100, saveSolverStates = False, useStoredSolution = True):
+            def phi_table(xim, xiv, h, c, maxIter:int = 100, saveSolverStates = False, useStoredSolution = True,
+                          LstepParams = [0.25, 0.01, 0.003], tstepParams = [0.25, 9.5, 0.02]):
                 # Invert from (h, c) to (L, t)
                 L, t = Lt_from_hc_newton(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm, detailedWarn, 
-                                    maxIter, saveSolverStates, useStoredSolution)
+                                    maxIter, saveSolverStates, useStoredSolution, LstepParams, tstepParams)
                 return InterpPhi(xim, xiv, L, t)
 
             phi_mvhc_arr.append(phi_table) 
