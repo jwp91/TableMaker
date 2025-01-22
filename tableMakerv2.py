@@ -641,11 +641,11 @@ def Lt_from_hc_newton(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds
             guess[3] = tmax
 
         # If solver gets stuck, stick it somewhere random
-        if i > 1 and (np.abs(states[i-1] - guess) <= tolerance).all():
+        if i > 1 and (np.abs(states[i-1] - guess) <= tolerance).any():
             guess[2] = np.random.rand()*(Lmax-Lmin) + Lmin
             guess[3] = np.random.rand()*(tmax-tmin) + tmin
             #print("Solver got stuck: randomized guess.")# Feedback
-        elif i > 2 and (np.abs(states[i-2] - guess) <= tolerance).all():
+        elif i > 2 and (np.abs(states[i-2] - guess) <= tolerance).any():
             # Looks back 2 iterations for basic periodic handling.
             guess[2] = np.random.rand()*(Lmax-Lmin) + Lmin
             guess[3] = np.random.rand()*(tmax-tmin) + tmin

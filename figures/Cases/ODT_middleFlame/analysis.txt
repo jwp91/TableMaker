@@ -1,0 +1,15 @@
+Inputs: 
+xim = 0.0837
+xiv = 0.00124
+h   = -9.98e+05
+c   = 0.155
+
+Temperatures:
+ODT: 971.683068
+Table-queried: 1379.3861707224557
+
+Assessment:
+- Solver gets stuck in the low-L well. 
+- 2-resonance observed in L in the solverRecord
+    - tm2 code detects resonance of the whole solver state, not individual dimensions. 
+      Adjusted code to randomize solver position with any resonance. This could be problematic.
