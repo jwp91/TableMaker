@@ -1,0 +1,36 @@
+unset key
+set sty dat l
+plot \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00001.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00002.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00003.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00004.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00005.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00006.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00007.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00008.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00009.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00010.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00011.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00012.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00013.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00014.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00015.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00016.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00017.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00018.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00019.dat' us 9:29 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00020.dat' us 9:29 w p, \
+'flm_23_00.dat' us 2:4, \
+'flm_23_01.dat' us 2:4, \
+'flm_23_02.dat' us 2:4, \
+'flm_23_03.dat' us 2:4, \
+'flm_23_04.dat' us 2:4, \
+'flm_23_05.dat' us 2:4, \
+'flm_23_06.dat' us 2:4, \
+'flm_23_07.dat' us 2:4, \
+'flm_23_08.dat' us 2:4, \
+'flm_23_09.dat' us 2:4, \
+'flm_23_10.dat' us 2:4, \
+'flm_23_11.dat' us 2:4, \
+'flm_23_12.dat' us 2:4, \

@@ -1,0 +1,47 @@
+unset key
+set sty dat l
+plot \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00001.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00002.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00003.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00004.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00005.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00006.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00007.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00008.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00009.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00010.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00011.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00012.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00013.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00014.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00015.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00016.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00017.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00018.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00019.dat' us 9:8 w p, \
+'../ODT/data/tjet_Le1B/data/data_00000/dmp_00020.dat' us 9:8 w p, \
+'flm_00_00.dat' us 2:3, \
+'flm_01_00.dat' us 2:3, \
+'flm_02_00.dat' us 2:3, \
+'flm_03_00.dat' us 2:3, \
+'flm_04_00.dat' us 2:3, \
+'flm_05_00.dat' us 2:3, \
+'flm_06_00.dat' us 2:3, \
+'flm_07_00.dat' us 2:3, \
+'flm_08_00.dat' us 2:3, \
+'flm_09_00.dat' us 2:3, \
+'flm_10_00.dat' us 2:3, \
+'flm_11_00.dat' us 2:3, \
+'flm_12_00.dat' us 2:3, \
+'flm_13_00.dat' us 2:3, \
+'flm_14_00.dat' us 2:3, \
+'flm_15_00.dat' us 2:3, \
+'flm_16_00.dat' us 2:3, \
+'flm_17_00.dat' us 2:3, \
+'flm_18_00.dat' us 2:3, \
+'flm_19_00.dat' us 2:3, \
+'flm_20_00.dat' us 2:3, \
+'flm_21_00.dat' us 2:3, \
+'flm_22_00.dat' us 2:3, \
+'flm_23_00.dat' us 2:3, \
