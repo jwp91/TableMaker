@@ -1,0 +1,34 @@
+set sty dat l
+unset key
+plot \
+'flm_00_00.dat' us 2:4, \
+'flm_00_01.dat' us 2:4, \
+'flm_00_02.dat' us 2:4, \
+'flm_00_03.dat' us 2:4, \
+'flm_00_04.dat' us 2:4, \
+'flm_00_05.dat' us 2:4, \
+'flm_00_06.dat' us 2:4, \
+'flm_00_07.dat' us 2:4, \
+'flm_00_08.dat' us 2:4, \
+'flm_00_09.dat' us 2:4, \
+'flm_00_10.dat' us 2:4, \
+'flm_00_11.dat' us 2:4, \
+'flm_00_12.dat' us 2:4, \
+'flm_00_13.dat' us 2:4, \
+'flm_00_14.dat' us 2:4, \
+'flm_00_15.dat' us 2:4, \
+'flm_00_16.dat' us 2:4, \
+'flm_00_17.dat' us 2:4, \
+'flm_00_18.dat' us 2:4, \
+'flm_00_19.dat' us 2:4, \
+'flm_00_20.dat' us 2:4, \
+'../table/data_radi/dmp_00012.dat' us 9:29 w lp, \
+#'../table/data_radi/dmp_00003.dat' us 9:29 w lp, \
+#'../table/data_radi/dmp_00004.dat' us 9:29 w lp, \
+#'../table/data_radi/dmp_00005.dat' us 9:29 w lp, \
+#'../table/data_radi/dmp_00006.dat' us 9:29 w lp, \
+#'../table/data_radi/dmp_00007.dat' us 9:29 w lp, \
+#'../table/data_radi/dmp_00008.dat' us 9:29 w lp, \
+#'../table/data_radi/dmp_00009.dat' us 9:29 w lp, \
+#'../table/data_radi/dmp_00010.dat' us 9:29 w lp, \
+#'../table/data_radi/dmp_00011.dat' us 9:29 w lp, \

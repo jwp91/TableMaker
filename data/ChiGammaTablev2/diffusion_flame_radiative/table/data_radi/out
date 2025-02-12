@@ -1,0 +1,42 @@
+set sty dat lp
+set yrange [-5000000:0]
+set xrange [0:1]
+plot 'dmp_00001.dat' us 9:29; pause -1
+plot 'dmp_00002.dat' us 9:29; pause -1
+plot 'dmp_00003.dat' us 9:29; pause -1
+plot 'dmp_00004.dat' us 9:29; pause -1
+plot 'dmp_00005.dat' us 9:29; pause -1
+plot 'dmp_00006.dat' us 9:29; pause -1
+plot 'dmp_00007.dat' us 9:29; pause -1
+plot 'dmp_00008.dat' us 9:29; pause -1
+plot 'dmp_00009.dat' us 9:29; pause -1
+plot 'dmp_00010.dat' us 9:29; pause -1
+plot 'dmp_00011.dat' us 9:29; pause -1
+plot 'dmp_00012.dat' us 9:29; pause -1
+plot 'dmp_00013.dat' us 9:29; pause -1
+plot 'dmp_00014.dat' us 9:29; pause -1
+plot 'dmp_00015.dat' us 9:29; pause -1
+plot 'dmp_00016.dat' us 9:29; pause -1
+plot 'dmp_00017.dat' us 9:29; pause -1
+plot 'dmp_00018.dat' us 9:29; pause -1
+plot 'dmp_00019.dat' us 9:29; pause -1
+plot 'dmp_00020.dat' us 9:29; pause -1
+plot 'dmp_00021.dat' us 9:29; pause -1
+plot 'dmp_00022.dat' us 9:29; pause -1
+plot 'dmp_00023.dat' us 9:29; pause -1
+plot 'dmp_00024.dat' us 9:29; pause -1
+plot 'dmp_00025.dat' us 9:29; pause -1
+plot 'dmp_00026.dat' us 9:29; pause -1
+plot 'dmp_00027.dat' us 9:29; pause -1
+plot 'dmp_00028.dat' us 9:29; pause -1
+plot 'dmp_00029.dat' us 9:29; pause -1
+plot 'dmp_00030.dat' us 9:29; pause -1
+plot 'dmp_00031.dat' us 9:29; pause -1
+plot 'dmp_00032.dat' us 9:29; pause -1
+plot 'dmp_00033.dat' us 9:29; pause -1
+plot 'dmp_00034.dat' us 9:29; pause -1
+plot 'dmp_00035.dat' us 9:29; pause -1
+plot 'dmp_00036.dat' us 9:29; pause -1
+plot 'dmp_00037.dat' us 9:29; pause -1
+plot 'dmp_00038.dat' us 9:29; pause -1
+plot 'dmp_00039.dat' us 9:29; pause -1

@@ -1,0 +1,36 @@
+set sty dat l
+unset key
+plot \
+'flm_16_00.dat' us 2:5, \
+'flm_17_00.dat' us 2:5, \
+'flm_18_00.dat' us 2:5, \
+'flm_19_00.dat' us 2:5, \
+'flm_20_00.dat' us 2:5, \
+'flm_21_00.dat' us 2:5, \
+'flm_22_00.dat' us 2:5, \
+'flm_23_00.dat' us 2:5, \
+'flm_24_00.dat' us 2:5, \
+'flm_25_00.dat' us 2:5, \
+'flm_26_00.dat' us 2:5, \
+'flm_27_00.dat' us 2:5, \
+'flm_28_00.dat' us 2:5, \
+'flm_29_00.dat' us 2:5, \
+'flm_30_00.dat' us 2:5, \
+'flm_31_00.dat' us 2:5, \
+'flm_32_00.dat' us 2:5, \
+'flm_33_00.dat' us 2:5, \
+'flm_34_00.dat' us 2:5, \
+'flm_35_00.dat' us 2:5, \
+'flm_36_00.dat' us 2:5, \
+'../table/data_radi/dmp_00012.dat' us 9:($12+$17+$23+$24) w lp, \
+#'../table/data_radi/dmp_00003.dat' us 9:($12+$17+$23+$24) w lp, \
+#'../table/data_radi/dmp_00004.dat' us 9:($12+$17+$23+$24) w lp, \
+#'../table/data_radi/dmp_00005.dat' us 9:($12+$17+$23+$24) w lp, \
+#'../table/data_radi/dmp_00006.dat' us 9:($12+$17+$23+$24) w lp, \
+#'../table/data_radi/dmp_00007.dat' us 9:($12+$17+$23+$24) w lp, \
+#'../table/data_radi/dmp_00008.dat' us 9:($12+$17+$23+$24) w lp, \
+#'../table/data_radi/dmp_00009.dat' us 9:($12+$17+$23+$24) w lp, \
+#'../table/data_radi/dmp_00010.dat' us 9:($12+$17+$23+$24) w lp, \
+#'../table/data_radi/dmp_00011.dat' us 9:($12+$17+$23+$24) w lp, \
+
+
