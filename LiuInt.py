@@ -2,6 +2,37 @@ import numpy as np
 from scipy.special import gamma
 from scipy.integrate import quad
 
+def normFunc(a, b):
+    """Computes the value of gamma(a+b)/gamma(a)/gamma(b) using expressions derived using Stirling's Approximation.
+    scipy.special.gamma(n) overflows when n > 171. This function handles cases where n > 170
+    """
+    if a > 171:
+        if b > 171:
+            # All gammas -> Stirling's
+            q = (a + b - 0.5)*np.log(a + b) \
+                - (a - 0.5)  *np.log(a) \
+                - (b - 0.5)  *np.log(b) \
+                - 0.5*np.log(2*np.pi)
+        else:
+            # Leave gamma(b) as is
+            q = ((a + b - 0.5)*np.log(a + b) \
+                - (a - 0.5)   *np.log(a) \
+                - b)*gamma(b)
+    else:
+        if b > 171:
+            # Leave gamma(a) as is
+            q = ((a + b - 0.5)*np.log(a + b) \
+                - a \
+                - (b - 0.5)  *np.log(b))*gamma(a)
+        else:
+            # Leave all gammas
+            return gamma(a + b)/(gamma(a)*gamma(b))
+    if q > 709:
+        # Avoid overflow
+        return np.inf
+    else:
+        return np.exp(q)
+
 def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1, silence:bool = False):
     """
     Function for calculating ϕ_avg for a given ξ_avg and ξ_variance. 
@@ -19,105 +50,87 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1, silence:bool =
         upp: upper bound for integration. Will be one in most applications
         silence: bool; if set to True, no warnings will be printed
     """
+    # Avoids casting error if ϕ(ξ) is a constant
     if(type(ϕ)==int):
-        return ϕ              # Avoids casting error if ϕ(ξ) is a constant
-    #--------- Function to be integrated: ϕ(ξ)*P(ξ; ξm, ξv)
+        return ϕ
+    
+    # If ξm is numerically zero or one, the variance must be zero:
+    if ξm == 0 and ξv != 0:
+        if not silence:
+            print(f"LiuInt Error: ξv must be zero because ξm==0. ξv inputted = {ξv}, corrected to 0")
+        return ϕ(ξm)
+    elif ξm == 1 and ξv != 0:
+        if not silence:
+            print(f"LiuInt Error: ξv must be zero because ξm==1. ξv inputted = {ξv}, corrected to 0")
+        return ϕ(ξm)        
+
+    # At max variance, the PDF becomes 2 delta functions, the heights of which are proportional to the mean mixture fraction. 
+    ξv_max = ξm*(1-ξm)
+    if ξv == ξv_max:
+        return (1-ξm)*ϕ(0) + ξm*ϕ(1)
+    
     def P(ξ, a, b):
-        P = ξ**(a-1) * (1-ξ)**(b-1)       # βPDF, non-normalized
+        # non-normalized βPDF
+        P = ξ**(a-1) * (1-ξ)**(b-1)
         return P
         
     def ϕP(ξ, a, b):
+        # Function to be integrated: ϕ(ξ)*P(ξ; ξm, ξv)
         return ϕ(ξ)*P(ξ, a, b)
-    
-    #--------- βPDF parameters:
-    #Note: if ξm is numerically zero or one, the variance must be zero:
-    if ξm == 0 and ξv != 0:
-        ξv = 0
-        if not silence:
-            print(f"LiuInt Error: ξv must be zero because ξm==0. ξv inputted = {ξv}, corrected to 0")
-    if ξm == 1 and ξv != 0:
-        ξv = 0
-        if not silence:
-            print(f"LiuInt Error: ξv must be zero because ξm==1. ξv inputted = {ξv}, corrected to 0")
-
-    #Treating ξv boundary conditions:
-    if ξv == 0:
-        return ϕ(ξm)
-
-    ξv_max = ξm*(1-ξm)
-    if ξv == ξv_max:
-        return (1-ξm)*ϕ(0) + ξm*ϕ(1) 
-        #This can be derived knowing that with max variance, the PDF becomes
-        #2 delta functions whose height are proportional to the mean mixture fraction. 
         
     # Calculate parameters
-    a = ( ξm*(1-ξm)/ξv - 1 )*ξm
-    b = ( ξm*(1-ξm)/ξv - 1 )*(1-ξm)
+    a = ( ξv_max/ξv - 1 )*ξm
+    b = ( ξv_max/ξv - 1 )*(1-ξm)
 
-    # Avoid βPDF singularities. This block shouldn't execute, hence the print statements for debugging. 
+    # Avoid βPDF singularities.
     zero = 1e-8
     if a <= zero:
+        if not silence:
+            print(f"LiuInt Warning: 'a' corrected from {a} to {zero}")
         a = zero
-        if not silence:
-            print(f"LiuInt Warning: 'a' computed to be zero. Corrected to {zero}")
     if b <= zero:
-        b = zero
         if not silence:
-            print(f"LiuInt Warning: 'b' computed to be zero. Corrected to {zero}")
-
-    def stirlingNorm(a, b):
-        """Computes the value of gamma(a+b)/gamma(a)/gamma(b) using Stirling's Approximation.
-        scipy.special.gamma(n) overflows when n ~>= 170
-        In contrast, this function overflows when n ~>= 1200
-            In the context of this function, n = a+b.
-        """
-        q = (a+b-0.5)*np.log(a+b) - 0.5*np.log(2*np.pi) - (a-0.5)*np.log(a) - (b-0.5)*np.log(b)
-        return np.exp(q)
+            print(f"LiuInt Warning: 'b' corrected from {b} to {zero}")
+        b = zero
     
-    if a+b<=171:
-        # Within scipy.special.gamma's tolerance
-        norm = gamma(a+b)/gamma(a)/gamma(b) # Normalization factor for BPDF
-    elif a+b<=1000:
-        # Within Stirling's Approximation's tolerance
-        norm = stirlingNorm(a, b)  # Normalization factor for BPDF
-    elif a < 1 or b < 1:
-        # Handle boundary singularity from a or b < 1 (Liu 767)
-        normDen = ϵ**a/a + quad(P, ϵ, 1-ϵ, args = (a, b), points = [ϵ*1.01,1-ϵ*1.01])[0] + ϵ**b/b
-        if normDen == 0 or normDen == np.inf:
-            # This means that the probability density function has gotten as close to two delta functions as 
-            # these approximations can tolerate.
-            return (1-ξm)*ϕ(0) + ξm*ϕ(1) 
+    norm = normFunc(a, b)
+    if norm == np.inf:
+        # a or b is too large
+        if a < 1 or b < 1:
+            # Approaching a delta function on one side
+            # Handle boundary singularity from a or b < 1 (Liu 767)
+            normDen = ϵ**a/a + quad(P, ϵ, 1-ϵ, args = (a, b), points = [ϵ*1.01,1-ϵ*1.01])[0] + ϵ**b/b
+            if normDen == 0 or normDen == np.inf:
+                # This means that the probability density function has gotten as close to two delta functions as 
+                # these approximations can tolerate.
+                return (1-ξm)*ϕ(0) + ξm*ϕ(1)
+            else:
+                norm = 1/normDen
         else:
-            norm = 1/normDen
-    else:
-        # Handle very large a or b (Liu 767)
-        fmax = 1/(1 + (b - 1)/(a - 1))
-        if a > 500 and a>= b:
-            # Limit value of a
-            a = 500
-            b = (a - 1 - fmax*(a - 2))/fmax
-        elif b > 500 and b >= a:
-            # Limit value of b
-            b = 500
-            a = (1 + fmax*(b - 2))/(1 - fmax)
-        else:
-            # The code shouldn't get to here
-            raise ValueError(f"""LiuInt Err1: normalization factor could not be computed.
-                             a  = {a}
-                             b  = {b}
-                             ξm = {ξm}
-                             ξv = {ξv}""")
-        if a+b<=171:
-            # Within scipy.special.gamma's tolerance
-            norm = gamma(a+b)/gamma(a)/gamma(b) # Normalization factor for BPDF
-        elif a+b<=1000:
-            # Within Stirling's Approximation's tolerance
-            norm = stirlingNorm(a, b)  # Normalization factor for BPD
-        else:
-            # This likely means that the probability density function has gotten as close to a delta function as 
-            # these approximations can tolerate. At this point, ignore the variance and return the property
-            # evaluated at the mean. This happens at extremely low variances (xiv < 1e-309)
-            return ϕ(ξm)
+            # NOTE: this needs further evaluation.
+            # Handle very large a or b (Liu 767)
+            fmax = 1/(1 + (b - 1)/(a - 1))
+            if a > 500 and a>= b:
+                # Limit value of a
+                a = 500
+                b = (a - 1 - fmax*(a - 2))/fmax
+            elif b > 500 and b >= a:
+                # Limit value of b
+                b = 500
+                a = (1 + fmax*(b - 2))/(1 - fmax)
+            else:
+                # The code shouldn't get to here
+                raise ValueError(f"""LiuInt Err1: normalization factor could not be computed.
+                                a  = {a}
+                                b  = {b}
+                                ξm = {ξm}
+                                ξv = {ξv}""")
+            norm = normFunc(a, b)
+            if norm == np.inf:
+                # This means that the probability density function has gotten as close to a delta function as 
+                # these approximations can tolerate. At this point, ignore the variance and return the property
+                # evaluated at the mean.
+                return ϕ(ξm)
     
     #--------- Correction for boundary singularity (Liu 767). Utilizes the fact that ϕ(0) and ϕ(1) are known at the endpoints.
     ϕ0 = ϕ(0)
@@ -167,7 +180,7 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1, silence:bool =
         p1, p2 = 0,0
         p3 = p3*(upp-low)/ϵ
 
-    # DEBUGGING
+    # Error detection
     if np.isnan((p1+p2+p3)*norm):
         print("ERROR: returned value is nan. Details:")
         print(f"p1 = {p1}, p2 = {p2}, p3 = {p3}")
@@ -176,7 +189,7 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1, silence:bool =
 
     return (p1+p2+p3)*norm        # Normalizes the βPDF integration before returning.
 
-def bPdf(ξ, ξm, ξv, ϵ = 1e-6):
+def bPdf(ξ, ξm, ξv, ϵ = 1e-6, silence = True):
     """
     Calculates P(ξ) according to the Beta PDF
     Parameters:
@@ -193,77 +206,63 @@ def bPdf(ξ, ξm, ξv, ϵ = 1e-6):
         P = ξ**(a-1) * (1-ξ)**(b-1)       # βPDF, non-normalized
         return P
     
-    zero = ϵ #Parameter to avoid divide by zero errors
-    if ξm == 0:
-        ξm = ϵ
-    if ξv == 0:
-        ξv = ϵ
-    a = ξm*( ξm*(1-ξm)/ξv - 1 )
-    b = ( ξm*(1-ξm)/ξv - 1 )*(1-ξm)
-    
-    np.seterr(divide='ignore')           # Disables ZeroDivisionError for when ξ = 0 or 1
-    
-    # Calculate parameters
-    a = ( ξm*(1-ξm)/ξv - 1 )*ξm
-    b = ( ξm*(1-ξm)/ξv - 1 )*(1-ξm)
 
-    # Avoid βPDF singularities. This block shouldn't execute, hence the print statements for debugging. 
+    np.seterr(divide='ignore')           # Disables ZeroDivisionError for when ξ = 0 or 1
+
+    # Calculate parameters
+    ξv_max = ξm*(1-ξm)
+    a = ( ξv_max/ξv - 1 )*ξm
+    b = ( ξv_max/ξv - 1 )*(1-ξm)
+
+    # Avoid βPDF singularities.
     zero = 1e-8
     if a <= zero:
+        if not silence:
+            print(f"LiuInt Warning: 'a' corrected from {a} to {zero}")
         a = zero
     if b <= zero:
+        if not silence:
+            print(f"LiuInt Warning: 'b' corrected from {b} to {zero}")
         b = zero
-
-    def stirlingNorm(a, b):
-        """Computes the value of gamma(a+b)/gamma(a)/gamma(b) using Stirling's Approximation.
-        scipy.special.gamma(n) overflows when n ~>= 170
-        In contrast, this function overflows when n ~>= 1200
-            In the context of this function, n = a+b.
-        """
-        q = (a+b-0.5)*np.log(a+b) - 0.5*np.log(2*np.pi) - (a-0.5)*np.log(a) - (b-0.5)*np.log(b)
-        return np.exp(q)
     
-    if a+b<=171:
-        # Within scipy.special.gamma's tolerance
-        norm = gamma(a+b)/gamma(a)/gamma(b) # Normalization factor for BPDF
-    elif a+b<=1000:
-        # Within Stirling's Approximation's tolerance
-        norm = stirlingNorm(a, b)  # Normalization factor for BPDF
-    elif a < 1 or b < 1:
-        # Handle boundary singularity from a or b < 1 (Liu 767)
-        normDen = ϵ**a/a + quad(P, ϵ, 1-ϵ, args = (a, b), points = [ϵ*1.01,1-ϵ*1.01])[0] + ϵ**b/b
-        if normDen == 0 or normDen == np.inf:
-            # This means that the probability density function has gotten as close to two delta functions as 
-            # these approximations can tolerate.
-            return (1-ξm)*ϕ(0) + ξm*ϕ(1) 
+    norm = normFunc(a, b)
+    if norm == np.inf:
+        # a or b is too large
+        if a < 1 or b < 1:
+            # Approaching a delta function on one side
+            # Handle boundary singularity from a or b < 1 (Liu 767)
+            normDen = ϵ**a/a + quad(P, ϵ, 1-ϵ, args = (a, b), points = [ϵ*1.01,1-ϵ*1.01])[0] + ϵ**b/b
+            if normDen == 0 or normDen == np.inf:
+                # This means that the probability density function has gotten as close to two delta functions as 
+                # these approximations can tolerate.
+                return (1-ξm)*ϕ(0) + ξm*ϕ(1)
+            else:
+                norm = 1/normDen
         else:
-            norm = 1/normDen
-    else:
-        # Handle very large a or b (Liu 767)
-        fmax = 1/(1 + (b - 1)/(a - 1))
-        if a > 500 and a>= b:
-            # Limit value of a
-            a = 500
-            b = (a - 1 - fmax*(a - 2))/fmax
-        elif b > 500 and b >= a:
-            # Limit value of b
-            b = 500
-            a = (1 + fmax*(b - 2))/(1 - fmax)
-        else:
-            # The code shouldn't get to here
-            raise ValueError(f"""LiuInt Err1: normalization factor could not be computed.
-                             a  = {a}
-                             b  = {b}
-                             ξm = {ξm}
-                             ξv = {ξv}""")
-        if a+b<=171:
-            # Within scipy.special.gamma's tolerance
-            norm = gamma(a+b)/gamma(a)/gamma(b) # Normalization factor for BPDF
-        elif a+b<=1000:
-            # Within Stirling's Approximation's tolerance
-            norm = stirlingNorm(a, b)  # Normalization factor for BPD
-        else:
-            return 1
+            # NOTE: this needs further evaluation.
+            # Handle very large a or b (Liu 767)
+            fmax = 1/(1 + (b - 1)/(a - 1))
+            if a > 500 and a>= b:
+                # Limit value of a
+                a = 500
+                b = (a - 1 - fmax*(a - 2))/fmax
+            elif b > 500 and b >= a:
+                # Limit value of b
+                b = 500
+                a = (1 + fmax*(b - 2))/(1 - fmax)
+            else:
+                # The code shouldn't get to here
+                raise ValueError(f"""LiuInt Err1: normalization factor could not be computed.
+                                a  = {a}
+                                b  = {b}
+                                ξm = {ξm}
+                                ξv = {ξv}""")
+            norm = normFunc(a, b)
+            if norm == np.inf:
+                # This means that the probability density function has gotten as close to a delta function as 
+                # these approximations can tolerate. At this point, ignore the variance and return the property
+                # evaluated at the mean.
+                return 1.0
         
     P = ξ**(a-1) * (1-ξ)**(b-1) * norm
         
