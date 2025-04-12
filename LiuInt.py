@@ -1,34 +1,12 @@
 import numpy as np
-from scipy.special import gamma
+from scipy.special import gamma, gammaln
 from scipy.integrate import quad
 
 def normFunc(a, b):
-    """Computes the value of gamma(a+b)/gamma(a)/gamma(b) using expressions derived using Stirling's Approximation.
-    scipy.special.gamma(n) overflows when n > 171. This function handles cases where n > 170
-    """
-    if a > 171:
-        if b > 171:
-            # All gammas -> Stirling's
-            q = (a + b - 0.5)*np.log(a + b) \
-                - (a - 0.5)  *np.log(a) \
-                - (b - 0.5)  *np.log(b) \
-                - 0.5*np.log(2*np.pi)
-        else:
-            # Leave gamma(b) as is
-            q = ((a + b - 0.5)*np.log(a + b) \
-                - (a - 0.5)   *np.log(a) \
-                - b)*gamma(b)
-    else:
-        if b > 171:
-            # Leave gamma(a) as is
-            q = ((a + b - 0.5)*np.log(a + b) \
-                - a \
-                - (b - 0.5)  *np.log(b))*gamma(a)
-        else:
-            # Leave all gammas
-            return gamma(a + b)/(gamma(a)*gamma(b))
-    if q > 709:
-        # Avoid overflow
+    """Computes the normalization factor for the beta-PDF"""
+    q = gammaln(a+b) - gammaln(a) - gammaln(b)
+    if np.abs(q) > 709:
+        # Avoid overflow or zeroing out
         return np.inf
     else:
         return np.exp(q)
@@ -69,18 +47,24 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1, silence:bool =
     if ξv == ξv_max:
         return (1-ξm)*ϕ(0) + ξm*ϕ(1)
     
+    # If variance is zero, return the property at the mean mixture fraction
+    if ξv == 0:
+        return ϕ(ξm)
+    
+
+    # Non-normalized βPDF
     def P(ξ, a, b):
-        # non-normalized βPDF
         P = ξ**(a-1) * (1-ξ)**(b-1)
         return P
-        
+    
+
+    # Function to be integrated: ϕ(ξ)*P(ξ; ξm, ξv)
     def ϕP(ξ, a, b):
-        # Function to be integrated: ϕ(ξ)*P(ξ; ξm, ξv)
         return ϕ(ξ)*P(ξ, a, b)
         
     # Calculate parameters
     a = ( ξv_max/ξv - 1 )*ξm
-    b = ( ξv_max/ξv - 1 )*(1-ξm)
+    b = ( ξv_max/ξv - 1 )*(1 - ξm)
 
     # Avoid βPDF singularities.
     zero = 1e-8
@@ -93,30 +77,38 @@ def IntegrateForPhiBar(ξm, ξv, ϕ, ϵ = 1e-6, low = 0, upp = 1, silence:bool =
             print(f"LiuInt Warning: 'b' corrected from {b} to {zero}")
         b = zero
     
+    # Calculate the normalization constant
     norm = normFunc(a, b)
     if norm == np.inf:
-        # a or b is too large
+        # a or b is too large to compute norm
         if a < 1 or b < 1:
-            # Approaching a delta function on one side
+            # Approaching a delta function on one or both sides
             # Handle boundary singularity from a or b < 1 (Liu 767)
             normDen = ϵ**a/a + quad(P, ϵ, 1-ϵ, args = (a, b), points = [ϵ*1.01,1-ϵ*1.01])[0] + ϵ**b/b
             if normDen == 0 or normDen == np.inf:
-                # This means that the probability density function has gotten as close to two delta functions as 
-                # these approximations can tolerate.
-                return (1-ξm)*ϕ(0) + ξm*ϕ(1)
+                # The probability density function has gotten as close to a delta function as 
+                # these approximations can tolerate. Return a value
+                if ξv <= 0.5*ξv_max:
+                    # For low variances, return the property at the mean:
+                    return ϕ(ξm) 
+                else:
+                    # For high variances, return a weighted average of the endpoints:
+                    return (1-ξm)*ϕ(0) + ξm*ϕ(1)
             else:
                 norm = 1/normDen
         else:
-            # NOTE: this needs further evaluation.
-            # Handle very large a or b (Liu 767)
+            # Simply returning the mean value works more consistently than Liu's method below.
+            return ϕ(ξm)   # Comment this line out to use Liu's method. 
+            # Approaching a delta function in the middle
+            # Handle very large a or b (Liu 767, Eqs. 25 & 26)
             fmax = 1/(1 + (b - 1)/(a - 1))
-            if a > 500 and a>= b:
+            if a > 1000 and a>= b:
                 # Limit value of a
-                a = 500
+                a = 1000
                 b = (a - 1 - fmax*(a - 2))/fmax
-            elif b > 500 and b >= a:
+            elif b > 1000 and b >= a:
                 # Limit value of b
-                b = 500
+                b = 1000
                 a = (1 + fmax*(b - 2))/(1 - fmax)
             else:
                 # The code shouldn't get to here
