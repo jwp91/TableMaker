@@ -14,59 +14,99 @@ import LiuInt as LI # Package with functions for integrating over the BPDF, para
 from scipy.interpolate import RegularGridInterpolator as rgi
 from datetime import datetime
 import multiprocessing as mp
+import dill
 
 ############################## tableMakerv2
 
 class table:
     """
-    Class for creating flamelet-progress variable tables of flame properties.
-    The table is created using data from a rectangular set of flame simulations of dimension (L,t) where L and t are some parameters. 
+    Object for maintaining flamelet-progress variable tables of arbitrary flame properties, phi.
+    Tables are created using data from a rectangular set of flamelet simulations of dimension (L,t),
+        where L and t are some indexed parameters (e.g., integer values only)
+    Example case:
+        L is a strain parameter and t is a heat loss parameter. 
+        A flamelet simulation is run for each combination of L and t. 
+        The results of each simulation are stored in a data file, 
+            where each column contains property data (e.g., mixf, T, rho, Yi, etc.)
+            for each row (spatial location).
+        Each results files' name contains (indexed!) values of L, t.
+            - For the first file, this would be (0,0), for the second file (0,1), etc.
+            - The code that parses this data checks a user-provided list of expected L and t indices 
+              against the file names to ensure there are no mismatches.
+        These files are stored in a certain directory, the path to which is passed as an argument to the class. 
+        The class can then:
+            - Parse the data files in the directory, including the creation of progress variable data based on
+              the mass fractions of specified chemical components (c_components)
+            - Create functions phi(ξ) for any specified property, phi
+            - Create a lookup table of phi_avg(ξm, ξv, L, t) for any specified property, phi
+                - This assumes a subgrid beta-PDF distribution for the mixture fraction, ξ, 
+                  parameterized by ξm (mean mixture fraction) and ξv (mixture fraction variance).
+                - The subgrid distributions of L and t are assumed to be delta functions about their means.
+            - Create an interpolator for phi_avg(ξm, ξv, L, t) using RegularGridInterpolator
+            - Create a function phi_avg(ξm, ξv, h, c)
+                - Solves internally for (L,t) given (h,c). This can done using either:
+                    1. The gamma-chi formulation, detailed by Porter, Lignell, and Berryhill (2025?), or
+                    2. A 2D Newton solver.
+                - The latter is substantially slower, but is more general and includes tuning parameters. 
+
+    The class is initialized with:
+        - path to the directory containing the data files
+        - list of L indices used in the file names
+        - list of t indices used in the file names
+        - regular expression to identify which files are data files
+        - list of chemical components to use in the progress variable
+        - interpolation method for the functions phi(xi)
+        - name of the column header identifying the mixture fraction in the data files
+        - interpolation method for the intermediate function phi(xim, xiv, L, t)
+        - number of data points between bounds for both xim and xiv (mean and variance of mixture fraction, respectively)
+        - fraction of the xim domain that should contain ximGfrac (another parameter) of the total xim points
+        - path to a file containing columns of mixf and sensible enthalpy data (J/kg)
+        - array of gamma values, implying the functional relationship between t and gamma (a continuous parameter)
+            For example, if tvals = [0, 1, 2, ...], gammaValues = [0, 0.05, 0.1, ...] allows gamma(t) to be defined.
     """
     
-    def __init__(self, path_to_flame_data, Lvals, tvals, Lbounds, tbounds, file_pattern = r'^L.*.dat$', 
+    def __init__(self, path_to_data, Lvals, tvals, flmt_file_pattern = r'^flm.*.dat$', 
                  c_components = ['H2', 'H2O', 'CO', 'CO2'], phiFunc_interpKind = 'cubic', 
-                 mix_frac_name = "mixf", mvlt_interpKind = 'linear', nxim:int=5, nxiv:int = 5,
+                 mixf_col_name = 'mixf', mvlt_interpKind = 'linear', nxim:int=5, nxiv:int = 5,
                 ximLfrac = 0.5, ximGfrac = 0.5, path_to_hsens = './data/ChiGammaTablev3/hsens.dat', 
                 gammaValues = None):
         """
-        Initializes the TableMaker class with the path to the flame data and the L and t values.
+        Initializes the TableMaker class with necessary variables for table creation.
         Inputs:
             path_to_data = path to flamelet data relative to the current folder. 
                 NOTE: The data headers must be the last commented line before the data begins.
                 The code found at https://github.com/BYUignite/flame was used in testing. 
-            Each file will have been run under an array of conditions L,t:
-            Lvals: values of parameter L used, formatted as a list (ex. [ 0.002, 0.02, 0.2])
-            tvals: values of parameter t used, formatted as a list (ex. [ 0    , 1   , 2  ])
-            Lbounds: tuple containing the minimum and maximum value of L
-            tbounds: tuple contianing the minimum and maximum value of t
-            file_pattern = regular expression (regex) to identify which files in the target folder are data files.  
+            flmt_file_pattern = regular expression (regex) to identify which files in the target folder are data files.  
                 DEFAULT: r'^L.*.dat$'. This grabs any files that begin with "L" and end with ".dat". 
+            Lvals: values of parameter L used, formatted as a list (e.g., [ 0, 1, 2, ...])
+            tvals: values of parameter t used, formatted as a list (e.g., [ 0, 1, 2, ...])
             c_components = list defining whih components' mass fractions are included in the progress variable. 
-                By default, this is set to be ['H2', 'H2O', 'CO', 'CO2']
-                The strings in the list should each match a string used in 'header'
-            phiFunc_interpKind = specifies the method of interpolation that should be used for phi(xi) functions (uses scipy.interp1d). 
+                Default =  ['H2', 'H2O', 'CO', 'CO2']
+                The strings in the list should each match the strings used in the header of the flamelet data files.
+            phiFunc_interpKind = specifies the method of interpolation that should be used for phi(xi) functions (scipy.interp1d). 
                 Default = 'cubic'.
-            mix_frac_name = name of the column header for mixture fraction in flamelet data files. Default value: "mixf"\n
+            mixf_col_name = name of the column header for mixture fraction in flamelet data files. 
+                Default value: 'mixf'
             mvlt_interpKind = interpolation method that RegularGridInterpolator should use in the create_interpolator_mvlt method. 
                 Default = 'linear'
-            numXim, numXiv: Number of data points between bounds for ξm and ξv, respectively. Default value: 5
-            ximLfrac: (0 to 1), fraction of the xim domain that should contain ximGfrac of the total numXim points
-            ximGfrac: (0 to 1), fraction of the total numXim points that should fall inside of ximLfrac of the total domain.
-                Example: if ximLfrac = 0.2 and ximGfrac = 0.5, then 50% of the numXim points will fall in the first 20% of the domain.
+            nxim, nxiv: Number of data points between bounds for ξm and ξv, respectively. Default value: 5
+            ximLfrac: (0 to 1), fraction of the xim domain that should contain ximGfrac of the total nxim points
+            ximGfrac: (0 to 1), fraction of the total nxim points that should fall inside of ximLfrac of the total domain.
+                Example: if ximLfrac = 0.2 and ximGfrac = 0.5, then 50% of the nxim points will fall in the first 20% of the domain.
             path_to_hsens: path to a file containing the sensible enthalpy data (col1 = mixf, col2 = h[J/kg])
-            gammaValues: array of gamma values corresponding to the index of the t values loaded in. 
+            gammaValues: array of gamma values corresponding to the t values loaded in. 
                 For example, if tvals = [0, 1, 2, ...], gammaValues = [0, 0.05, 0.1, ...] would be appropriate.
         """
-        self.path_to_flame_data = path_to_flame_data
-        self.path_to_data = self.path_to_flame_data   # Alias
+        self.path_to_data = path_to_data
+        self.path_to_flame_data = self.path_to_data   # Alias
         self.Lvals = Lvals
         self.tvals = tvals
-        self.Lbounds = Lbounds
-        self.tbounds = tbounds
-        self.file_pattern = file_pattern
+        self.Lbounds = [min(Lvals), max(Lvals)]
+        self.tbounds = [min(tvals), max(tvals)]
+        self.flmt_file_pattern = flmt_file_pattern
         self.c_components = c_components
         self.phiFunc_interpKind = phiFunc_interpKind
-        self.mix_frac_name = mix_frac_name
+        self.mixf_col_name = mixf_col_name
         self.mvlt_interpKind = mvlt_interpKind
         self.nxim = nxim
         self.nxiv = nxiv
@@ -97,7 +137,7 @@ class table:
         self.xims = xims
         self.xivs = xivs
 
-        # Values created later
+        # Data populated later
         self.flmt_data = None
         self.headers = None
         self.extras = None
@@ -107,8 +147,13 @@ class table:
         self.mvlt_interp_storage = {}
         self.hsensFunc = None
         self.phi_mvhc_funcs = {}
+        self.norm = False # Used in newton solve
 
-    
+    def force_warning(self):
+        print("""Notice: setting force=True in a function only forces that particular function to re-run.
+              For example, calling create_phi_funcs('T', force=True) will force the phi_funcs for T to be re-created,
+              but will not force the source data to be re-parsed.""")
+
     def compute_progress_variable(self, data, header):
         """
         Progress variable is defined as the sum of the mass fractions of a specified set of c_components.
@@ -142,7 +187,7 @@ class table:
 
     ##############################
 
-    def parse_data(self):
+    def parse_data(self, force = False):
         """
         Reads and formats data resulting from a grid of flamelet simulations.
     
@@ -154,6 +199,13 @@ class table:
                 This data is not processed in any way by this code and is included only for optional accessibility
         """
         s = self
+        if force:
+            s.force_warning()
+        elif s.flmt_data is not None and s.headers is not None and s.extras is not None:
+            # Data already parsed and stored: no need to re-parse.
+            print("Data already parsed. Use 'force = True' to re-parse data.")
+            return s.flmt_data, s.headers, s.extras
+            
         #---------- Check if the provided path is a valid directory
         if not os.path.isdir(s.path_to_data):
             print(f"Error: {s.path_to_data} is not a valid directory: no data loaded.")
@@ -166,7 +218,7 @@ class table:
         filenames = np.array([])
         data_files = np.array([])
         for file in files:
-            if match(s.file_pattern, os.path.basename(file)):
+            if match(s.flmt_file_pattern, os.path.basename(file)):
                 filenames = np.append(filenames,  os.path.basename(file))
                 data_files= np.append(data_files, file)
 
@@ -176,6 +228,7 @@ class table:
         extras   = np.empty((len(s.Lvals),len(s.tvals)), dtype=np.ndarray)  # Initialize to store extra info before header
 
         #---------- Grab and store data
+        print("Parsing data files...")
         for i in range(len(data_files)):
             # This indexing assumes the same # of time scales were run for each length scale
             l = i//len(s.tvals)   # Row index
@@ -234,7 +287,7 @@ class table:
             flmt_data[l,t] = transposed_file_data
         
         #flmt_data is indexed using flmt_data[Lval][tval][column# = Property][row # = data point]
-        print("Completed data import ('parse_data')")
+        print("Completed data import (parse_data)")
         self.flmt_data = flmt_data
         self.headers = headers
         self.extras = extras
@@ -242,7 +295,7 @@ class table:
 
     ##############################
 
-    def make_phi_funcs(self, phi = 'T', Lt = False):
+    def create_phi_funcs(self, phi, Lt = False, force = False):
         """
         Returns an array of interpolated functions phi(ξ) where phi is any property of the flame.\n
         Inputs:\n
@@ -252,8 +305,8 @@ class table:
                 This definition can be changed by modifying the c_components parameter.\n
             Lt = Tuple with indices corresponding to the desired L and t. If set to False (default), the output will be an array of the functions phi(ξ) for all datafiles. \n
                 Otherwise, this parameter determines which specific file should be used. \n
-                Example1: make_phi_funcs(path, phi = 'T', Lt = (0,1)): returns the interpolated T(ξ) function ONLY from the data in the file from Lvals[0], tvals[1]. \n
-                Example2: make_phi_funcs(path, phi = 'T'): returns an array containing the interpolated T(ξ) functions from every file in the directory\n
+                Example1: create_phi_funcs(path, phi = 'T', Lt = (0,1)): returns the interpolated T(ξ) function ONLY from the data in the file from Lvals[0], tvals[1]. \n
+                Example2: create_phi_funcs(path, phi = 'T'): returns an array containing the interpolated T(ξ) functions from every file in the directory\n
                 Note that the values in this tuple are not values of L and t, but rather indexes of Lvals and tvals.\n
             
         Outputs:\n
@@ -262,10 +315,20 @@ class table:
                 - If Lt is specified, the output will be the function for the specified file only. \n
         """
         s = self
+        if force:
+            s.force_warning()
+        elif phi in s.phi_funcs:
+            # If the phi function already exists, return it.
+            print(f"phi_funcs for {phi} already exists. Use 'force = True' to re-create it.")
+            if Lt == False:
+                return s.phi_funcs[phi]
+            else:
+                return s.phi_funcs[phi][Lt[0]][Lt[1]]
+
         #---------- Import data, files, and headers
-        if s.flmt_data == None:
-            # No processed data passed in: must generate.
-            s.flmt_data, s.headers, s.extras = s.parse_data()
+        if s.flmt_data is None:
+            # No processed data yet generated: must generate.
+            s.parse_data()
         
         #---------- Get list of available phi (list of all data headers from original files)
         if type(Lt) == bool:
@@ -289,7 +352,7 @@ class table:
             if phis[i]==phi.replace(" ",""):
                 # Phi column identified
                 phi_col = i
-            if phis[i]==s.mix_frac_name:
+            if phis[i]==s.mixf_col_name:
                 # Mixture fraction column identified
                 xi_col = i
         if phi_col == -1:
@@ -297,7 +360,7 @@ class table:
             raise ValueError("{} not recognized. Available phi are:\n {}".format(phi, phis))
         if xi_col == -1:
             # Xi wasn't found.
-            raise ValueError(f"Mixture fraction ('{s.mix_frac_name}') was not found among data columns.")
+            raise ValueError(f"Mixture fraction ('{s.mixf_col_name}') was not found among data columns.")
 
         #---------- Interpolate phi(xi)
         phi_funcs = np.empty((len(s.Lvals),len(s.tvals)), dtype=np.ndarray)
@@ -322,7 +385,7 @@ class table:
 
     ##############################
         
-    def make_lookup_table(self, phi = 'T'):
+    def create_lookup_table(self, phi, force = False):
         """
         Creates a 4D lookup table of phi_avg data. Axis are ξm, ξv, L, and t. 
         Inputs:
@@ -332,9 +395,16 @@ class table:
                 This definition can be changed by modifying the c_components parameter.
         """
         s = self
-        # If parse_data_output is not provided, the function will call parse_data to generate the data.
+        if force:
+            s.force_warning()
+        elif phi in s.table_storage:
+            # If the table already exists, return it.
+            print(f"Lookup table for {phi} already exists. Use 'force = True' to re-create it.")
+            return s.table_storage[phi], s.indices_storage[phi]
+        
+        # If needed phi_funcs don't exist, create them
         if phi not in s.phi_funcs:
-            s.make_phi_funcs(phi = phi)
+            s.create_phi_funcs(phi = phi)
         
         #----------- Table Creation
         table = np.full((s.nxim, s.nxiv, len(s.Lvals), len(s.tvals)), -1.0)
@@ -364,16 +434,23 @@ class table:
 
     ##############################
 
-    def create_interpolator_mvlt(self, phi, data, inds, extrapolate = True):
+    def create_interpolator_mvlt(self, phi, data, inds, extrapolate = True, force = False):
         """
         Creates an interpolator using RegularGridInterpolator (rgi).
         Inputs:
             phi = property for which values will be tabulated (ex. 'T', 'rho', etc.), case sensitive.
-            data, inds =  table and indices created by make_lookup_table
+            data, inds =  table and indices created by create_lookup_table
 
         The returned function is called with func(xim, xiv, L, t)
         """
         s = self
+        if force:
+            s.force_warning()
+        elif phi in s.mvlt_interp_storage:
+            # If the interpolator already exists, return it.
+            print(f"Interpolator for {phi} already exists. Use 'force = True' to re-create it.")
+            return s.mvlt_interp_storage[phi]
+        
         xi_means = inds[0]
         xi_vars = inds[1] # Normalized to Xivmax
         Ls = inds[2]
@@ -414,8 +491,15 @@ class table:
         return func
     
     ##############################
-    def create_hsensFunc(self, path_to_hsens):
+    def create_hsensFunc(self, path_to_hsens, force = False):
         s = self
+        if force:
+            s.force_warning()
+        elif s.hsensFunc is not None:
+            # If the hsens function already exists, return it.
+            print("hsensFunc already exists. Use 'force = True' to re-create it.")
+            return s.hsensFunc
+
         # Parse needed data
         hsensdata = np.loadtxt(path_to_hsens, skiprows = 1)
         hsensFunc = interp1d(hsensdata[:,0], hsensdata[:,1], kind = 'linear') # Sensible enthalpy (J/kg) as a function of mixf
@@ -435,7 +519,8 @@ class table:
             xivmax = xim*(1-xim)
             xiv = max(0, min(xiv*xim*(1-xim), xivmax))
             return interpolator([xim, xiv])
-        return hsensFunc
+        s.hsensFunc = hsensFunc
+        return s.hsensFunc
 
     def Lt_from_hc_GammaChi(self, hgoal, cgoal, xim, xiv, hInterp, cInterp,
                             useStoredSolution:bool = True):
@@ -470,11 +555,11 @@ class table:
         h0 = hInterp(0, 0, s.Lbounds[0], s.tbounds[0])  # Enthalpy of pure fuel
         h1 = hInterp(1, 0, s.Lbounds[0], s.tbounds[0])  # Enthalpy of pure oxidizer
         ha = h0*(1-xim) + h1*xim                        # Adiabatic enthalpy    
-        global hsensFunc
-        if hsensFunc is None:
-            hsensFunc = s.create_hsensFunc(s.path_to_hsens, nxims = s.nxim, nxivs = s.nxiv)
+
+        if s.hsensFunc is None:
+            s.hsensFunc = s.create_hsensFunc(s.path_to_hsens, nxims = s.nxim, nxivs = s.nxiv)
         
-        gamma = (ha - hgoal)/hsensFunc(xim, xiv)        # Heat loss parameter
+        gamma = (ha - hgoal)/s.hsensFunc(xim, xiv)        # Heat loss parameter
         
         t = gammaToIndex(gamma)                         # Time scale index
         if isinstance(t, np.ndarray):
@@ -513,15 +598,264 @@ class table:
         np.savetxt("chiGamma_lastsolution.txt", np.array([L]))
         return [L, t]
 
+    def Lt_from_hc_newton(self, hgoal, cgoal, xim, xiv, hInterp, cInterp, norm, detailedWarn:bool = False, 
+                          maxIter:int = 100, saveSolverStates:bool = False, useStoredSolution:bool = True, 
+                          LstepParams = [0.25, 0.01, 0.003], tstepParams = [0.25, 9.5, 0.02]):
+        """
+        For the gamma-chi formlation of the table, this function is inefficient. Use Lt_from_hc_GammaChi instead.
+
+        Solves for (L,t) given values of (h,c) using a 2D Newton solver.
+        Params:
+            hgoal: value of enthalpy
+            cgoal: value of progress variable
+                xim: mean mixture fraction
+                xiv: mixture fraction variance
+            hInterp: interpolated function for h(xim, xiv, L, t), created using "create_interpolator_mvlt"
+            cInterp: interpolated function for c(xim, xiv, L, t), created using "create_interpolator_mvlt"
+            norm   := np.max(h_table)/np.max(c_table). Compensates for the large difference in magnitude between typical h and c values.
+            detailedWarn: If set to true, more detailed warnings will be raised when the solver does not converge.    
+            maxIter: int, sets a limit for the maximum iterations the solver should make.
+            saveSolverStates: bool, if set to True, the solver states will be saved to a file in the folder "solver_data"
+            useStoredSolution:bool, if set to False, the solver will not use the last solution as its initial guess. 
+                Using the last initial guess (default) is generally good: CFD will solve cell-by-cell, and nearby
+                cells are expected to have similar values of phi.
+            LstepParams: array of parameters used to relax the solver
+                LstepParams[0] = 0.25; normal max step size (% of domain)
+                LstepParams[1] = 0.01; threshold value of L, below which the max step size is reduced to
+                LstepParams[2] = 0.003; reduced max step size (% of domain)
+            tstepParams: array of parameters used to relax the solver
+                tstepParams[0] = 0.25; normal max step size (% of domain)
+                tstepParams[1] = 9.5; threshold value of t, above which the max step size is reduced to
+                tstepParams[2] = 0.02; reduced max step size (% of domain)
+            
+        Returns a tuple of form (L,t)
+        This function is to be used for getting values of phi by phi(xim, xiv, [L,t](h,c))
+        """
+        s = self
+        # Note: The following functions assume constant xim and xiv. 
+        # These parameters are included in F and X to allow a generic function to be used.
+
+        def F(mvlt):
+            # Computes h and c residuals from a set mvlt
+            hresid = hInterp(*mvlt) - hgoal
+            cresid = (cInterp(*mvlt) - cgoal)*norm # norm ensures both h and c are of similar magnitude
+            return np.array([hresid, cresid])
+        
+        def get_jac(F, X0, F0=None):
+            """Computes the 2x2 Jacobian of F(X) at X
+            Params:
+                F = F(mvlt) = [h(mvlt) - hSet, c(mvlt)-cSet]
+                    Example code:
+                    def F(mvlt):
+                        return np.array([hInterp(*mvlt)-hSet, cInterp(*mvlt)-cSet])
+                X0 = [xim, xiv L, t]
+                F0 = F(X0)
+            Returns:
+                J = [[dH/dL  dH/dt],
+                    [dc/dL  dc/dt]]
+            """
+            # Confirm X is an array
+            X0 = np.array(X0)
+
+            # Compute F0 if not provided
+            if F0 is None:
+                F0 = F(X0)
+
+            # Set deltas
+            scalar = 1e-8 #square root of machine precision
+            deltaL = np.array([0, 0, X0[2]*scalar+scalar, 0]) # Adding prevents delta = 0
+            deltat = np.array([0, 0, 0, X0[3]*scalar+scalar]) # Adding prevents delta = 0
+            
+            # Compute gradients
+            if X0[2] + deltaL[2] > s.Lbounds[1]:
+                # Avoid stepping over L boundary when adding deltaL
+                J0 = (F0 - F(X0 - deltaL))/deltaL[2]  # = [dH/dL, dc/dL]
+            else:
+                J0 = (F(X0 + deltaL) - F0)/deltaL[2]  # = [dH/dL, dc/dL]
+
+            if X0[3] + deltat[3] > s.tbounds[1]:
+                # Avoid stepping over t boundary when adding deltat
+                J1 = (F0 - F(X0 - deltat))/deltat[3]  # = [dH/dt, dc/dt]
+            else:
+                J1 = (F(X0 + deltat) - F0)/deltat[3]  # = [dH/dt, dc/dt]
+
+            return np.array([J0, J1]).T[0] # Without this final indexing, the shape is (1, 2, 2) instead of (2, 2)
+        
+        def cramer_solve(F, X0):
+            """
+            Solves the system of equations JX=F(X0) for X using Cramer's rule.
+            Params:
+                F: f(mvlt) = [h(mvlt)-hSet, c(mvlt)-cSet]
+                X0: [xim, xiv L, t]
+            Returns:
+                X = [J^(-1)][F(X0)]
+            """
+            # Confirm X is an array
+            X0 = np.array(X0)
+
+            # Solve the system
+            F0 = F(X0)
+            J = get_jac(F, X0, F0)
+
+            D = (J[0][0]*J[1][1] - J[0][1]*J[1][0])
+            D1 = (F0[0]*J[1][1] - J[0][1]*F0[1])
+            D2 = (J[0][0]*F0[1] - F0[0]*J[1][0])
+            if np.array(D) == 0:
+                # Handle nan values. This will happen if the Jacobian is singular. 
+                # Physically, this means that the variables are not changing in time, 
+                # for example if xim = xiv = 0 (cold, non-reacting mixture). In this 
+                # case, we set Lchange and tchange to 0. The remaining solver code
+                # will handle the rest.
+                Lchange = 0
+                tchange = 0
+            else:
+                Lchange = D1/D
+                tchange = D2/D
+
+            # Ensure values returned are floats
+            if isinstance(Lchange, np.ndarray):
+                Lchange = Lchange[0]
+            if isinstance(tchange, np.ndarray):
+                tchange = tchange[0]
+
+            # Relax solver: don't allow changes more than a certain fraction of the total domain
+            maxFrac_L = LstepParams[0] if X0[2]>LstepParams[1] else LstepParams[2] # Maximum allowable %change in L relative to the domain
+            maxFrac_t = tstepParams[0] if X0[3]<tstepParams[1] else tstepParams[2] # Maximum allowable %change in L relative to the domain
+            Lrange = np.abs(max(s.Lbounds) - min(s.Lbounds))
+            trange = np.abs(max(s.tbounds) - min(s.tbounds))
+            if Lchange != 0:
+                Lsign = Lchange/np.abs(Lchange)
+            else:
+                Lsign = 1.0
+            if tchange != 0:
+                tsign = tchange/np.abs(tchange)
+            else:
+                tsign = 1.0
+            
+            Lchange = np.min([np.abs(Lchange), Lrange*maxFrac_L])*Lsign
+            tchange = np.min([np.abs(tchange), trange*maxFrac_t])*tsign
+            
+            return np.array([0, 0, Lchange, tchange])
+        
+        # Create initial guess
+        # Get the directory of the current Python script
+        try:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+        except:
+            # Get the directory of the current jupyter notebook
+            current_dir = os.path.dirname(os.path.abspath(''))
+
+        # Check if "file.txt" exists in the same directory
+        file_path = os.path.join(current_dir, "newtonsolve_lastsolution.txt")
+
+        Lmin = s.Lbounds[0]+1e-6
+        Lmax = s.Lbounds[1]-1e-6
+        tmin = s.tbounds[0]+1e-6
+        tmax = s.tbounds[1]-1e-6
+        Lstart = (Lmax-Lmin)*0.25+Lmin
+        tstart = (tmax-tmin)*0.9+tmin
+        if os.path.isfile(file_path) and useStoredSolution:
+            guess = np.loadtxt("newtonsolve_lastsolution.txt")
+            guess[0], guess[1] = (xim, xiv)
+        else:
+            guess   = [xim, xiv, Lstart, tstart]
+
+        # Solve parameters
+        tolerance = 1e-8  # Minimum SSE for solver to terminate. This was arbitrarily set to a "low" number.
+        states = np.tile(guess, (maxIter, 1))
+        errors = np.ones(maxIter)
+        
+        # Solve
+        i=0    # Store index: used later to truncate saved data
+        for i in range(1, maxIter):
+            
+            # Compute new point
+            change = cramer_solve(F, guess)
+            guess -= change
+
+            # Enforce bounds
+            #     If the new point is out of bounds, it will first correct the solver to a point very close to the boundary. 
+            if guess[2] <= s.Lbounds[0]:
+                guess[2] = Lmin
+            elif guess[2] >= s.Lbounds[1]:
+                guess[2] = Lmax
+            if guess[3] <= s.tbounds[0]:
+                guess[3] = tmin
+            elif guess[3] >= s.tbounds[1]:
+                guess[3] = tmax
+
+            # If solver gets stuck, stick it somewhere random
+            if i>1 and np.abs(states[i-1][2] - guess[2]) <= tolerance:
+                guess[2] = np.random.rand()*(Lmax-Lmin) + Lmin
+            elif i>2 and np.abs(states[i-2][2] - guess[2]) <= tolerance:
+                guess[2] = np.random.rand()*(Lmax-Lmin) + Lmin
+            if i>2 and np.abs(states[i-1][3] - guess[3]) <= tolerance:
+                guess[3] = np.random.rand()*(tmax-tmin) + tmin
+            elif i>2 and np.abs(states[i-2][3] - guess[3]) <= tolerance:
+                guess[3] = np.random.rand()*(tmax-tmin) + tmin
+            
+            states[i] = guess # Record point in case no solution is found
+            errors[i] = np.sum([err**2 for err in F(guess)]) # SSE
+            
+            # Evaluate convergence
+            if errors[i] <= tolerance:
+                break # Tolerance met: end loop
+
+            # Throw warning if max iterations is exceeded
+            if i==maxIter:
+                # If maxIter is reached, return the case with the lowest computed SSE:
+                guess = states[errors == np.min(errors)][0]
+                if detailedWarn:
+                    warnings.warn(f"""
+                                
+                    Maximum iterations ({maxIter}) exceeded in Lt_from_hc_newton solver.
+                    This indicates that the exact queried [xim, xiv, h, c] point was not found in the table.
+                    Using best-case computed result:
+                        xim = {guess[0]}
+                        xiv = {guess[1]}
+                        L   = {guess[2]}
+                        t   = {guess[3]}, for the desired point
+                        h   = {hgoal}
+                        c   = {cgoal}, where
+                        SSE for this point in the (h,c) -> (L,t) inversion = {errors[i]:.5g}
+                        Average SSE for all attepts at this inversion      = {np.mean(errors):5g}
+                    Result may be inaccurate.
+                    """)
+                else:
+                    warnings.warn("NewtonSolve did not fully converge, using case with lowest identified SSE.")
+                break
+
+        if saveSolverStates:
+            # Define the folder and file paths
+            folder_name = "solver_data"
+            folder_path = os.path.join(os.getcwd(), folder_name)
+            subfolder_name = datetime.now().strftime("%Y%m%d")
+            subfolder_path = os.path.join(folder_path, subfolder_name)
+            file_name = f"Xim_{xim}_Xiv_{xiv}_h_{hgoal:.4g}_c_{cgoal:.4g}.txt"
+            file_path = os.path.join(subfolder_path, file_name)
+
+            # Check if the folder exists, and create it if it doesn't
+            if not os.path.exists(folder_path):
+                os.makedirs(folder_path)
+            if not os.path.exists(subfolder_path):
+                os.makedirs(subfolder_path)
+
+            # Save the data as a text file in the folder
+            np.savetxt(file_path, np.hstack((states[0:i], np.array([errors[0:i]]).T)))
+
+        # Store solution to use as initial guess next time
+        np.savetxt("newtonsolve_lastsolution.txt", guess)
+        return [guess[2], guess[3]]
+
     def create_table_aux(self, args):
         """Auxiliary function used in phi_mvhc for parallelization. 
         The package used for parallelization ("concurrent") requires that the function being parallelized is defined 
         in the global scope.
         """
         # Generic table-generating function
-        return self.make_lookup_table(*args)
+        return self.create_lookup_table(*args)
 
-    def phi_mvhc(self, phi = 'T', parallel:bool = True, detailedWarn:bool = False):
+    def phi_mvhc(self, phi, parallel:bool = True, recreate_all = False):
         """
         Creates a table of phi values in terms of xim, xiv, h, and c
         Inputs:
@@ -530,7 +864,7 @@ class table:
                 NOTE: c (progress variable) is available in the data. By default, c ≡ y_CO2 + y_CO + y_H2O + yH2.
                 This definition can be changed by modifying the c_components parameter.
             parallel:bool = if set to True (default), the code will attempt to create tables in parallel.
-            detailedWarn: If set to true, more detailed warnings will be raised when the solver does not converge. 
+            recreate_all:bool = if set to True, the code will re-create all tables, even if they already exist.
             
         Outputs:
             phi_mvhc_arr: Array of phi functions phi = phi(xim, xiv, h, c)
@@ -550,34 +884,30 @@ class table:
         if type(phi) == type('str'):
             phi = [phi,]
 
-        # Import data, files, and headers
-        if s.flmt_data == None:
-            # No processed data passed in: must generate.
-            s.flmt_data, s.headers, s.extras = s.parse_data()
-
         # ------------ Compute tables, parallel or serial
-        # Enable solvers to be accessed when this code is imported as a package
-
         ####### Serial computation
         if not parallel: 
             # Create h & c tables
-            if 'h' not in self.table_storage or 'h' not in self.indices_storage:
-                h_table, h_indices = s.make_lookup_table('h')
+            if recreate_all or 'h' not in self.table_storage or 'h' not in self.indices_storage:
+                h_table, h_indices = s.create_lookup_table('h')
             else:
                 h_table = self.table_storage['h']
                 h_indices = self.indices_storage['h']
-            if 'c' not in self.table_storage or 'c' not in self.indices_storage:
-                c_table, c_indices = s.make_lookup_table('c')
+            if recreate_all or 'c' not in self.table_storage or 'c' not in self.indices_storage:
+                c_table, c_indices = s.create_lookup_table('c')
             else:
                 c_table = self.table_storage['c']
                 c_indices = self.indices_storage['c']
-        
+
+            # Set normalization factor
+            s.norm = np.max(np.abs(h_table))/np.max(c_table)
+
             # Create h & c interpolators
-            if 'h' not in s.mvlt_interp_storage:
+            if recreate_all or 'h' not in s.mvlt_interp_storage:
                 Ih = s.create_interpolator_mvlt('h', h_table, h_indices)
             else:
                 Ih = s.mvlt_interp_storage['h']
-            if 'c' not in s.mvlt_interp_storage:
+            if recreate_all or 'c' not in s.mvlt_interp_storage:
                 Ic = s.create_interpolator_mvlt('c', c_table, c_indices)
             else:
                 Ic = s.mvlt_interp_storage['c']
@@ -585,24 +915,31 @@ class table:
             # Create array containing phi tables
             for p in phi:
                 # Get base table with phi data
-                if p not in s.table_storage or p not in s.indices_storage:
-                    table, indices = s.make_lookup_table(p)
+                if recreate_all or p not in s.table_storage or p not in s.indices_storage:
+                    table, indices = s.create_lookup_table(p)
                 else:
                     table = s.table_storage[p]
                     indices = s.indices_storage[p]
         
                 # Create interpolator for phi
-                if p not in s.mvlt_interp_storage:
+                if recreate_all or p not in s.mvlt_interp_storage:
                     InterpPhi = s.create_interpolator_mvlt(p, table, indices)
                 else:
                     InterpPhi = s.mvlt_interp_storage[p]
                 
                 # Create function phi(xim, xiv, h, c)
                 def create_phi_table(interp_phi):
-                    def phi_table(xim, xiv, h, c, useStoredSolution = True):
+                    def phi_table(xim, xiv, h, c, useStoredSolution = True, solver='gammachi', 
+                                  detailedWarn = False, maxIter = 100, saveSolverStates = False, 
+                                  LstepParams = [0.25, 0.01, 0.003], tstepParams = [0.25, 9.5, 0.02]):
                         # Invert from (h, c) to (L, t), then return interpolated value.
-                        L, t = s.Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, useStoredSolution)
-                        
+                        if solver == 'gammachi':
+                            L, t = s.Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, useStoredSolution)
+                        elif solver == 'newton':
+                            L, t = s.Lt_from_hc_newton(h, c, xim, xiv, Ih, Ic, norm, detailedWarn, maxIter, 
+                                                       saveSolverStates, useStoredSolution, LstepParams, tstepParams)
+                        else:
+                            raise ValueError("Invalid solver specified. Use 'gammachi' or 'newton'.")
                         return interp_phi(xim, xiv, L, t)
                     return phi_table
 
@@ -615,11 +952,24 @@ class table:
             from concurrent.futures import ProcessPoolExecutor
             import concurrent
 
-            phi = np.append(np.array(['h', 'c']), np.array(phi)) # Need to create h and c tables too, so add them at the beginning. 
-            table_args = [(p,) for p in phi] # Arguments for each table's creation
+            phi = ['h', 'c'] + list(phi) # Need to create h and c tables too, so add them at the beginning. 
+            force_arr = np.full(len(phi), recreate_all)
+            table_args = [(phi[i],force_arr[i]) for i in range(len(phi))] # Arguments for each table's creation
 
             # Parallel table creation (should be reviewed)
-            with ProcessPoolExecutor(mp_context=mp.get_context('fork')) as executor:
+            # Try to get 'fork', fall back to 'spawn'
+            try:
+                # 'fork' is only available for Unix-like systems and is faster
+                ctx = mp.get_context('fork')
+            except ValueError:
+                # 'fork' is not available, use 'spawn'. Slower, but more compatible.
+                ctx = mp.get_context('spawn')
+
+            print("Beginning parallel table creation...")
+            with ProcessPoolExecutor(mp_context=ctx) as executor:
+                # KNOWN ISSUE: if using 'spawn' (e.g, on Windows), the parallelized table creations will not printt
+                #              their statuses. This makes it impossible to track completion of each table, which can 
+                #              be very lengthy for highly resolved tables.
                 futures = {executor.submit(s.create_table_aux, args): idx for idx, args in enumerate(table_args)}
                 results = {}
                 for future in concurrent.futures.as_completed(futures):
@@ -630,31 +980,52 @@ class table:
                         print(f"Table creation for index {idx} (phi = {phi[idx]}) generated an exception: {e}")
 
             # Create h & c interpolators -- These should only be set to cubic interpolation with a very dense table.
-            if 'h' not in s.mvlt_interp_storage:
-                h_table, h_indices = results[0]
+            
+            h_table, h_indices = results[0]
+            c_table, c_indices = results[1]
+            if recreate_all or 'h' not in s.mvlt_interp_storage:
                 Ih = s.create_interpolator_mvlt('h', h_table, h_indices)
             else:
                 Ih = s.mvlt_interp_storage['h']
-            if 'c' not in s.mvlt_interp_storage:
-                c_table, c_indices = results[1]
+            if recreate_all or 'c' not in s.mvlt_interp_storage:
                 Ic = s.create_interpolator_mvlt('c', c_table, c_indices)
+            else:
+                Ic = s.mvlt_interp_storage['c']
+            
+            # Set normalization factor
+            s.norm = np.max(np.abs(h_table))/np.max(c_table)
             
             # Create functions for phi(xim, xiv, h, c)
-            for p in phi:
-                i = np.where(phi = p)
-                if p not in s.mvlt_interp_storage:
+            for i, p in enumerate(phi):
+                if recreate_all or p not in s.mvlt_interp_storage:
                     InterpPhi = s.create_interpolator_mvlt(p, results[i][0], results[i][1])
                 else:
                     InterpPhi = s.mvlt_interp_storage[p]
                 
                 # Create function phi(xim, xiv, h, c)
                 def create_phi_table(interp_phi):
-                    def phi_table(xim, xiv, h, c, useStoredSolution = True):
+                    def phi_table(xim, xiv, h, c, useStoredSolution = True, solver='gammachi', 
+                                  detailedWarn = False, maxIter = 100, saveSolverStates = False, 
+                                  LstepParams = [0.25, 0.01, 0.003], tstepParams = [0.25, 9.5, 0.02]):
                         # Invert from (h, c) to (L, t), then return interpolated value.
-                        L, t = s.Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, useStoredSolution)
-                        
+                        if solver == 'gammachi':
+                            L, t = s.Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, useStoredSolution)
+                        elif solver == 'newton':
+                            L, t = s.Lt_from_hc_newton(h, c, xim, xiv, Ih, Ic, norm, detailedWarn, maxIter, 
+                                                       saveSolverStates, useStoredSolution, LstepParams, tstepParams)
+                        else:
+                            raise ValueError("Invalid solver specified. Use 'gammachi' or 'newton'.")
                         return interp_phi(xim, xiv, L, t)
                     return phi_table
 
                 s.phi_mvhc_funcs[p] = create_phi_table(InterpPhi)  # Store function in the class
             return s.phi_mvhc_funcs, s.table_storage
+        
+    def save(self, name = 'table'):
+        """
+        Saves this instance of table to a file.
+        Args:
+            name: Name of the file to save the table as. Default = 'table'.
+        """
+        with open(f'{name}.pkl', 'wb') as f:
+            dill.dump(self, f)

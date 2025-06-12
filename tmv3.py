@@ -865,7 +865,16 @@ def phi_mvhc(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
                        numXiv, data_output, ximLfrac, ximGfrac) for p in phi] # Arguments for each table's creation
 
         # Parallel table creation (should be reviewed)
-        with ProcessPoolExecutor(mp_context=mp.get_context('fork')) as executor:
+        # Try to get 'fork', fall back to 'spawn'
+        try:
+            # 'fork' is only available for Unix-like systems and is faster
+            ctx = mp.get_context('fork')
+        except ValueError:
+            # 'fork' is not available, use 'spawn'. Slower, but more compatible.
+            ctx = mp.get_context('spawn')
+
+        print("Beginning parallel table creation...")
+        with ProcessPoolExecutor(mp_context=ctx) as executor:
             futures = {executor.submit(create_table_aux, args): idx for idx, args in enumerate(table_args)}
             results = {}
             for future in concurrent.futures.as_completed(futures):
