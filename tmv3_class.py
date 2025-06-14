@@ -68,8 +68,8 @@ class table:
     def __init__(self, path_to_data, Lvals, tvals, flmt_file_pattern = r'^flm.*.dat$', 
                  c_components = ['H2', 'H2O', 'CO', 'CO2'], phiFunc_interpKind = 'cubic', 
                  mixf_col_name = 'mixf', mvlt_interpKind = 'linear', nxim:int=5, nxiv:int = 5,
-                ximLfrac = 0.5, ximGfrac = 0.5, path_to_hsens = './data/ChiGammaTablev3/hsens.dat', 
-                gammaValues = None):
+                 ximLfrac = 0.5, ximGfrac = 0.5, path_to_hsens = './data/ChiGammaTablev3/hsens.dat', 
+                 gammaValues = None):
         """
         Initializes the TableMaker class with necessary variables for table creation.
         Inputs:
@@ -503,16 +503,15 @@ class table:
         # Parse needed data
         hsensdata = np.loadtxt(path_to_hsens, skiprows = 1)
         hsensFunc = interp1d(hsensdata[:,0], hsensdata[:,1], kind = 'linear') # Sensible enthalpy (J/kg) as a function of mixf
+        
         # Make hsens table: hsens(xim, xiv)
-        xims = np.linspace(0, 1, s.nxims)
-        xivs = np.linspace(0, 1, s.nxivs)
-        hsensTable = np.zeros((s.nxims, s.nxivs))
-        for i in range(s.nxims):
-            ximVal = xims[i]
-            for j in range(s.nxivs):
-                xivVal = xivs[j]*ximVal*(1-ximVal)
+        hsensTable = np.zeros((s.nxim, s.nxiv))
+        for i in range(s.nxim):
+            ximVal = s.xims[i]
+            for j in range(s.nxiv):
+                xivVal = s.xivs[j]*ximVal*(1-ximVal)
                 hsensTable[i,j] = LI.IntegrateForPhiBar(ximVal, xivVal, hsensFunc)
-        interpolator = rgi((xims, xivs), hsensTable, method = 'linear')  # No extrapolation
+        interpolator = rgi((s.xims, s.xivs), hsensTable, method = 'linear')  # No extrapolation
         
         def hsensFunc(xim, xiv):
             # Returns hsens for a value of xim and xiv
@@ -557,7 +556,7 @@ class table:
         ha = h0*(1-xim) + h1*xim                        # Adiabatic enthalpy    
 
         if s.hsensFunc is None:
-            s.hsensFunc = s.create_hsensFunc(s.path_to_hsens, nxims = s.nxim, nxivs = s.nxiv)
+            s.hsensFunc = s.create_hsensFunc(s.path_to_hsens)
         
         gamma = (ha - hgoal)/s.hsensFunc(xim, xiv)        # Heat loss parameter
         

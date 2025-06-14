@@ -255,6 +255,28 @@ def phi_funcs(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_c
 
 ##############################
     
+
+def make_xim_xiv_arrs(numXim, numXiv, ximLfrac, ximGfrac):
+    if ximLfrac == ximGfrac:
+        Xims = np.linspace(0,1,numXim)      #Xim = Mean mixture fraction.
+    else:
+        nsteps = numXim-1
+        dx = np.ones(nsteps)/(nsteps)
+        n1 = int(nsteps*ximGfrac)
+        if n1 != 0:
+            dx1 = ximLfrac/n1
+            dx[0:n1] = dx1
+            n2  = nsteps - n1
+            if n2 != 0:
+                dx2 = (1-ximLfrac)/n2
+                dx[n1:] = dx2
+        Xims = np.zeros(numXim)
+        for i in range(len(Xims)-1):
+            Xims[i+1] = Xims[i] + dx[i]
+        Xims[-1] = 1.0
+    Xivs = np.linspace(0,1,numXiv)      #Xiv = Mixture fraction variance. Maximum valid Xiv depends on Xim, so we normalize the values to the maximum
+    return Xims, Xivs
+
 def make_lookup_table(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_components = ['H2', 'H2O', 'CO', 'CO2'],
                     phi = 'T', interpKind = 'cubic', numXim:int=150, numXiv:int = 30, get_data_files_output = None,
                     ximLfrac = 0.5, ximGfrac = 0.5):
@@ -290,25 +312,7 @@ def make_lookup_table(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.da
     funcs = phi_funcs(path_to_flame_data, Lvals, tvals, file_pattern = file_pattern, c_components = c_components, \
                       phi = phi, interpKind = interpKind, get_data_files_output = get_data_files_output)
 
-    #---------- Create arrays of ξm and ξv
-    if ximLfrac == ximGfrac:
-        Xims = np.linspace(0,1,numXim)      #Xim = Mean mixture fraction.
-    else:
-        nsteps = numXim-1
-        dx = np.ones(nsteps)/(nsteps)
-        n1 = int(nsteps*ximGfrac)
-        if n1 != 0:
-            dx1 = ximLfrac/n1
-            dx[0:n1] = dx1
-            n2  = nsteps - n1
-            if n2 != 0:
-                dx2 = (1-ximLfrac)/n2
-                dx[n1:] = dx2
-        Xims = np.zeros(numXim)
-        for i in range(len(Xims)-1):
-            Xims[i+1] = Xims[i] + dx[i]
-        Xims[-1] = 1.0
-    Xivs = np.linspace(0,1,numXiv)      #Xiv = Mixture fraction variance. Maximum valid Xiv depends on Xim, so we normalize the values to the maximum
+    Xims, Xivs = make_xim_xiv_arrs(numXim, numXiv, ximLfrac, ximGfrac)
     
     #----------- Table Creation
     table = np.full((numXim, numXiv, len(Lvals), len(tvals)), -1.0)
@@ -382,13 +386,14 @@ def create_interpolator_mvlt(data, inds, interpKind = 'linear', extrapolate = Tr
     return func
     
 ##############################
-def create_hsensFunc(path_to_hsens, nxims = 150, nxivs = 30):
+def create_hsensFunc(path_to_hsens, nxims = 150, nxivs = 30, ximLfrac=0.5, ximGfrac=0.5):
     # Parse needed data
     hsensdata = np.loadtxt(path_to_hsens, skiprows = 1)
     hsensFunc = interp1d(hsensdata[:,0], hsensdata[:,1], kind = 'linear') # Sensible enthalpy (J/kg) as a function of mixf
+    
     # Make hsens table: hsens(xim, xiv)
-    xims = np.linspace(0, 1, nxims)
-    xivs = np.linspace(0, 1, nxivs)
+    xims, xivs = make_xim_xiv_arrs(nxims, nxivs, ximLfrac, ximGfrac)
+    
     hsensTable = np.zeros((nxims, nxivs))
     for i in range(nxims):
         ximVal = xims[i]
@@ -408,7 +413,7 @@ hsensFunc = None
 global Lt_from_hc_GammaChi
 def Lt_from_hc_GammaChi(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tbounds, 
                         norm, useStoredSolution:bool = True, path_to_hsens = './data/ChiGammaTablev3/hsens.dat', 
-                        gammaValues = None, numXim=150, numXiv=30):
+                        gammaValues = None, numXim=150, numXiv=30, ximLfrac=0.5, ximGfrac=0.5):
     """
     Solves for (L,t) given values of (h,c) in the gamma-chi formulation of the table.
     This table is constructed so that file has:
@@ -447,7 +452,8 @@ def Lt_from_hc_GammaChi(hgoal, cgoal, xim, xiv, hInterp, cInterp, Lbounds, tboun
     ha = h0*(1-xim) + h1*xim                    # Adiabatic enthalpy    
     global hsensFunc
     if hsensFunc is None:
-        hsensFunc = create_hsensFunc(path_to_hsens, nxims = numXim, nxivs = numXiv)
+        hsensFunc = create_hsensFunc(path_to_hsens, nxims = numXim, nxivs = numXiv,
+                                      ximLfrac = ximLfrac, ximGfrac = ximGfrac)
     
     gamma = (ha - hgoal)/hsensFunc(xim, xiv)         # Heat loss parameter
     
@@ -844,7 +850,7 @@ def phi_mvhc(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
                                              maxIter, saveSolverStates, useStoredSolution, LstepParams, tstepParams)
                 elif solver == 'gammaChi':
                     L, t = Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm, useStoredSolution, path_to_hsens = path_to_hsens,
-                                               gammaValues = gammaValues, numXim=numXim, numXiv=numXiv)
+                                               gammaValues = gammaValues, numXim=numXim, numXiv=numXiv, ximLfrac=ximLfrac, ximGfrac=ximGfrac)
                 else:
                     raise ValueError("Invalid solver type. Must be 'newton' or 'gammaChi'.")
                 
@@ -911,8 +917,9 @@ def phi_mvhc(path_to_flame_data, Lvals, tvals, file_pattern = r'^L.*.dat$', c_co
                         L, t = Lt_from_hc_newton(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm, detailedWarn, 
                                     maxIter, saveSolverStates, useStoredSolution, LstepParams, tstepParams)
                     elif solver == 'gammaChi':
-                        L, t = Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm, useStoredSolution, path_to_hsens = path_to_hsens,
-                                    gammaValues = gammaValues, numXim=numXim, numXiv=numXiv)
+                        L, t = Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, Lbounds, tbounds, norm, useStoredSolution, 
+                                                   path_to_hsens = path_to_hsens, gammaValues = gammaValues, 
+                                                   numXim=numXim, numXiv=numXiv, ximLfrac=ximLfrac, ximGfrac=ximGfrac)
                     else:
                         raise ValueError("Invalid solver type. Must be 'newton' or 'gammaChi'.")
                     
