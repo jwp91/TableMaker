@@ -1,27 +1,31 @@
 # TableMaker version 3
 # Main Author: Jared Porter
 # Contributors: Dr. David Lignell, Jansen Berryhill
-# Some revisions completed with GitHub Copilot under the student license
+# Some revisions and refactors completed with GitHub Copilot under the student license
 
 import numpy as np
 from scipy.interpolate import interp1d
-from scipy.optimize import minimize, minimize_scalar
+from scipy.optimize import minimize
 import os
 import warnings
 from glob import glob
-from re import match, search
-import LiuInt as LI # Package with functions for integrating over the BPDF, parameterized by xi_avg and xi_variance
+from re import match
+import LiuInt as LI # Package with functions for integrating over the BPDF, parameterized by the average and variance of the mixture fraction.
 from scipy.interpolate import RegularGridInterpolator as rgi
 from datetime import datetime
 import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
+import concurrent
 import dill
+import time
+import sys
 
-############################## tableMakerv2
+############################## tableMakerv3 - object-oriented
 
 class table:
     """
     Object for maintaining flamelet-progress variable tables of arbitrary flame properties, phi.
-    Tables are created using data from a rectangular set of flamelet simulations of dimension (L,t),
+    Tables are created using data from a set of flamelet simulations of dimensions (L,t),
         where L and t are some indexed parameters (e.g., integer values only)
     Example case:
         L is a strain parameter and t is a heat loss parameter. 
@@ -47,22 +51,30 @@ class table:
                 - Solves internally for (L,t) given (h,c). This can done using either:
                     1. The gamma-chi formulation, detailed by Porter, Lignell, and Berryhill (2025?), or
                     2. A 2D Newton solver.
-                - The latter is substantially slower, but is more general and includes tuning parameters. 
+                - The latter is substantially slower and includes tuning parameters, but is more general. 
 
     The class is initialized with:
-        - path to the directory containing the data files
+        - path to the directory containing the flamelet data files
         - list of L indices used in the file names
         - list of t indices used in the file names
-        - regular expression to identify which files are data files
-        - list of chemical components to use in the progress variable
+        - regular expression to identify which files in the aforementioned path are data files
+            - Default: r'^L.*.dat$' (grabs any files that begin with "L" and end with ".dat")
+        - list of named chemical components, the sum of whose mass fractions will be used to compute the progress variable
+            - Default: ['H2', 'H2O', 'CO', 'CO2']
         - interpolation method for the functions phi(xi)
+            - Default: 'cubic'
         - name of the column header identifying the mixture fraction in the data files
+            - Default: 'mixf'
         - interpolation method for the intermediate function phi(xim, xiv, L, t)
+            - Default: 'linear'
         - number of data points between bounds for both xim and xiv (mean and variance of mixture fraction, respectively)
+            - Default values: nxim = 5, nxiv = 5 (much to course, but low computational load for initial testing)
         - fraction of the xim domain that should contain ximGfrac (another parameter) of the total xim points
+            - Default values: ximLfrac = 0.5, ximGfrac = 0.5 (even spacing)
         - path to a file containing columns of mixf and sensible enthalpy data (J/kg)
+            - Default: './data/ChiGammaTablev3/hsens.dat'
         - array of gamma values, implying the functional relationship between t and gamma (a continuous parameter)
-            For example, if tvals = [0, 1, 2, ...], gammaValues = [0, 0.05, 0.1, ...] allows gamma(t) to be defined.
+            For example, if tvals = [0, 1, 2, ...], gammaValues = [0, 0.05, 0.1, ...] defines the function gamma(t).
     """
     
     def __init__(self, path_to_data, Lvals, tvals, flmt_file_pattern = r'^flm.*.dat$', 
@@ -77,24 +89,24 @@ class table:
                 NOTE: The data headers must be the last commented line before the data begins.
                 The code found at https://github.com/BYUignite/flame was used in testing. 
             flmt_file_pattern = regular expression (regex) to identify which files in the target folder are data files.  
-                DEFAULT: r'^L.*.dat$'. This grabs any files that begin with "L" and end with ".dat". 
-            Lvals: values of parameter L used, formatted as a list (e.g., [ 0, 1, 2, ...])
-            tvals: values of parameter t used, formatted as a list (e.g., [ 0, 1, 2, ...])
+                Default = r'^L.*.dat$'. This grabs any files that begin with "L" and end with ".dat". 
+            Lvals = values of parameter L used, formatted as a list (e.g., [ 0, 1, 2, ...])
+            tvals = values of parameter t used, formatted as a list (e.g., [ 0, 1, 2, ...])
             c_components = list defining whih components' mass fractions are included in the progress variable. 
                 Default =  ['H2', 'H2O', 'CO', 'CO2']
                 The strings in the list should each match the strings used in the header of the flamelet data files.
             phiFunc_interpKind = specifies the method of interpolation that should be used for phi(xi) functions (scipy.interp1d). 
                 Default = 'cubic'.
             mixf_col_name = name of the column header for mixture fraction in flamelet data files. 
-                Default value: 'mixf'
+                Default value = 'mixf'
             mvlt_interpKind = interpolation method that RegularGridInterpolator should use in the create_interpolator_mvlt method. 
                 Default = 'linear'
             nxim, nxiv: Number of data points between bounds for ξm and ξv, respectively. Default value: 5
-            ximLfrac: (0 to 1), fraction of the xim domain that should contain ximGfrac of the total nxim points
-            ximGfrac: (0 to 1), fraction of the total nxim points that should fall inside of ximLfrac of the total domain.
+            ximLfrac = (0 to 1), fraction of the xim domain that should contain ximGfrac of the total nxim points
+            ximGfrac = (0 to 1), fraction of the total nxim points that should fall inside of ximLfrac of the total domain.
                 Example: if ximLfrac = 0.2 and ximGfrac = 0.5, then 50% of the nxim points will fall in the first 20% of the domain.
-            path_to_hsens: path to a file containing the sensible enthalpy data (col1 = mixf, col2 = h[J/kg])
-            gammaValues: array of gamma values corresponding to the t values loaded in. 
+            path_to_hsens = path to a file containing the sensible enthalpy data (col1 = mixf, col2 = h[J/kg])
+            gammaValues = array of gamma values corresponding to the t values loaded in. 
                 For example, if tvals = [0, 1, 2, ...], gammaValues = [0, 0.05, 0.1, ...] would be appropriate.
         """
         self.path_to_data = path_to_data
@@ -149,19 +161,24 @@ class table:
         self.phi_mvhc_funcs = {}
         self.norm = False # Used in newton solve
 
-    def force_warning(self):
-        print("""Notice: setting force=True in a function only forces that particular function to re-run.
+    def force_warning(self, queue=None):
+        message = """Notice: setting force=True in a function only forces that particular function to re-run.
               For example, calling create_phi_funcs('T', force=True) will force the phi_funcs for T to be re-created,
-              but will not force the source data to be re-parsed.""")
+              but will not force the source data to be re-parsed."""
+        if queue == None:
+            print(message)
+        else:
+            queue.put(message)
+
 
     def compute_progress_variable(self, data, header):
         """
         Progress variable is defined as the sum of the mass fractions of a specified set of c_components.
         This function computes the flame progress variable using:
-            data = Data from a flame simulation. Each row corresponds to a specific property.
+            data: Data from a flame simulation. Each row corresponds to a specific property.
                 In the case of this package, this data array is "transposed_file_data" inside the function "get_file_data"
                     ex. data[0] = array of temperature data.
-            header = 1D array of column headers, denoting which row in "data" corresponds to which property.
+            header: 1D array of column headers, denoting which row in "data" corresponds to which property.
                 ex. If header[0] = "Temp", then data[0] should be temperature data.
         """
         #---------- Determine where the c_components are in 'data'
@@ -193,9 +210,9 @@ class table:
     
         Outputs:
             flmt_data = an array with the data from each file, indexed using flmt_data[Lval][tval][column# = Property][row # = data point]
-            headers  = an array with the column labels from each file, indexed using headers[Lval][tval]
+            headers = an array with the column labels from each file, indexed using headers[Lval][tval]
                 Each file should have the same columns labels for a given instance of a simulation, but all headers are redundantly included.
-            extras   = an array storing any extra information included as comments at the beginning of each file, indexed using extras[Lval][tval]
+            extras = an array storing any extra information included as comments at the beginning of each file, indexed using extras[Lval][tval]
                 This data is not processed in any way by this code and is included only for optional accessibility
         """
         s = self
@@ -385,7 +402,7 @@ class table:
 
     ##############################
         
-    def create_lookup_table(self, phi, force = False):
+    def create_lookup_table(self, phi, force = False, queue = None):
         """
         Creates a 4D lookup table of phi_avg data. Axis are ξm, ξv, L, and t. 
         Inputs:
@@ -393,17 +410,26 @@ class table:
                 Available phi are viewable using "parse_data(params)[1]".
                 NOTE: c (progress variable) is available in the data. By default, c ≡ y_CO2 + y_CO + y_H2O + yH2. 
                 This definition can be changed by modifying the c_components parameter.
+            queue = multiprocessing queue object, used to handle parallel objects printing statements. Used internally.
         """
         s = self
         if force:
-            s.force_warning()
+            s.force_warning(queue=queue)
         elif phi in s.table_storage:
             # If the table already exists, return it.
-            print(f"Lookup table for {phi} already exists. Use 'force = True' to re-create it.")
+            if queue == None:
+                print(f"Lookup table for {phi} already exists. Use 'force = True' to re-create it.")
+            else:
+                queue.put(f"Lookup table for {phi} already exists. Use 'force = True' to re-create it.")
+                queue.put("SENTINEL")
             return s.table_storage[phi], s.indices_storage[phi]
         
         # If needed phi_funcs don't exist, create them
         if phi not in s.phi_funcs:
+            if queue == None:
+                print(f"Creating phi_funcs for {phi}...")
+            else:
+                queue.put(f"Creating phi_funcs for {phi}...")
             s.create_phi_funcs(phi = phi)
         
         #----------- Table Creation
@@ -411,7 +437,10 @@ class table:
         markers = (len(s.xims)*np.array([0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9])).astype(int) # Xim indices at which to notify the user
         for m in range(len(s.xims)):                                               #Loop over each value of ξm
             if m in markers:
-                print(f"{phi} table {int(m/len(s.xims)*100)}% complete.")
+                if queue == None:
+                    print(f"{phi} table {int(m/len(s.xims)*100)}% complete.")
+                else:
+                    queue.put(f"{phi} table {int(m/len(s.xims)*100)}% complete.")
             xim = s.xims[m]
             for v in range(len(s.xivs)):                                           #Loop over each value of ξv
                 xiv = s.xivs[v]*xim*(1-xim)
@@ -421,13 +450,18 @@ class table:
                         table[m,v,l,t] = phiAvg                                  # FINAL INDEXING: table[m,v,l,t]
 
                                 
-        #Returns: table itself, then an array of the values of Xims, Xivs, Lvals, and tvals for indexing the table.
-        #Ex. table[7][6][5][4] corresponds to Xim = indices[0][7], Xiv = indices[1][6], L = indices[2][5], t = indices[3][4].
-        #Note: Xiv is normalized to the maximum. For table[1][2][3][4], the actual value of the variance would be indices[1][6]*Xivmax,
-        #      where Xivmax = Xim*(1-Xim) =  indices[0][7]*(1-indices[0][7])
+        # Returns: table itself, then an array of the values of Xims, Xivs, Lvals, and tvals for indexing the table.
+        # Ex. table[7][6][5][4] corresponds to Xim = indices[0][7], Xiv = indices[1][6], L = indices[2][5], t = indices[3][4].
+        # Note: Xiv is normalized to the maximum. For table[1][2][3][4], the actual value of the variance would be indices[1][6]*Xivmax,
+        #       where Xivmax = Xim*(1-Xim) =  indices[0][7]*(1-indices[0][7])
         
         indices = [s.xims, s.xivs, s.Lvals, s.tvals]
-        print(f"Lookup table for phi = {phi} completed.")
+        if queue == None:
+            print(f"Lookup table for phi = {phi} completed.")
+        else:
+            queue.put(f"Lookup table for phi = {phi} completed.")
+            queue.put("SENTINEL") # Signal to the main process that one of the tables completed
+
         s.table_storage[phi] = table
         s.indices_storage[phi] = indices
         return table, indices
@@ -439,7 +473,7 @@ class table:
         Creates an interpolator using RegularGridInterpolator (rgi).
         Inputs:
             phi = property for which values will be tabulated (ex. 'T', 'rho', etc.), case sensitive.
-            data, inds =  table and indices created by create_lookup_table
+            data, inds = table and indices created by create_lookup_table
 
         The returned function is called with func(xim, xiv, L, t)
         """
@@ -533,13 +567,13 @@ class table:
         Note: chi:L :: gamma:t
 
         Function parameters:
-            hgoal: value of enthalpy
-            cgoal: value of progress variable
-            xim: mean mixture fraction
-            xiv: mixture fraction variance
-            hInterp: interpolated function for h(xim, xiv, L, t), created using "create_interpolator_mvlt"
-            cInterp: interpolated function for c(xim, xiv, L, t), created using "create_interpolator_mvlt"
-            useStoredSolution:bool, if set to False, the solver will not use the last solution as its initial guess. 
+            hgoal = value of enthalpy
+            cgoal = value of progress variable
+            xim = mean mixture fraction
+            xiv = mixture fraction variance
+            hInterp = interpolated function for h(xim, xiv, L, t), created using "create_interpolator_mvlt"
+            cInterp = interpolated function for c(xim, xiv, L, t), created using "create_interpolator_mvlt"
+            useStoredSolution:bool = if set to False, the solver will not use the last solution as its initial guess. 
                 Using the last initial guess (default) is generally good: CFD will solve cell-by-cell, and nearby
                 cells are expected to have similar values of phi.
                 
@@ -605,24 +639,24 @@ class table:
 
         Solves for (L,t) given values of (h,c) using a 2D Newton solver.
         Params:
-            hgoal: value of enthalpy
-            cgoal: value of progress variable
-                xim: mean mixture fraction
-                xiv: mixture fraction variance
-            hInterp: interpolated function for h(xim, xiv, L, t), created using "create_interpolator_mvlt"
-            cInterp: interpolated function for c(xim, xiv, L, t), created using "create_interpolator_mvlt"
+            hgoal = value of enthalpy
+            cgoal = value of progress variable
+                xim = mean mixture fraction
+                xiv = mixture fraction variance
+            hInterp = interpolated function for h(xim, xiv, L, t), created using "create_interpolator_mvlt"
+            cInterp = interpolated function for c(xim, xiv, L, t), created using "create_interpolator_mvlt"
             norm   := np.max(h_table)/np.max(c_table). Compensates for the large difference in magnitude between typical h and c values.
-            detailedWarn: If set to true, more detailed warnings will be raised when the solver does not converge.    
-            maxIter: int, sets a limit for the maximum iterations the solver should make.
-            saveSolverStates: bool, if set to True, the solver states will be saved to a file in the folder "solver_data"
-            useStoredSolution:bool, if set to False, the solver will not use the last solution as its initial guess. 
+            detailedWarn = If set to true, more detailed warnings will be raised when the solver does not converge.    
+            maxIter:int = sets a limit for the maximum iterations the solver should make.
+            saveSolverStates: bool = if set to True, the solver states will be saved to a file in the folder "solver_data"
+            useStoredSolution:bool = if set to False, the solver will not use the last solution as its initial guess. 
                 Using the last initial guess (default) is generally good: CFD will solve cell-by-cell, and nearby
                 cells are expected to have similar values of phi.
-            LstepParams: array of parameters used to relax the solver
+            LstepParams = array of parameters used to relax the solver
                 LstepParams[0] = 0.25; normal max step size (% of domain)
                 LstepParams[1] = 0.01; threshold value of L, below which the max step size is reduced to
                 LstepParams[2] = 0.003; reduced max step size (% of domain)
-            tstepParams: array of parameters used to relax the solver
+            tstepParams = array of parameters used to relax the solver
                 tstepParams[0] = 0.25; normal max step size (% of domain)
                 tstepParams[1] = 9.5; threshold value of t, above which the max step size is reduced to
                 tstepParams[2] = 0.02; reduced max step size (% of domain)
@@ -643,10 +677,10 @@ class table:
         def get_jac(F, X0, F0=None):
             """Computes the 2x2 Jacobian of F(X) at X
             Params:
-                F = F(mvlt) = [h(mvlt) - hSet, c(mvlt)-cSet]
-                    Example code:
-                    def F(mvlt):
-                        return np.array([hInterp(*mvlt)-hSet, cInterp(*mvlt)-cSet])
+                F  = F(mvlt) = [h(mvlt) - hSet, c(mvlt)-cSet]
+                     Example code:
+                     def F(mvlt):
+                         return np.array([hInterp(*mvlt)-hSet, cInterp(*mvlt)-cSet])
                 X0 = [xim, xiv L, t]
                 F0 = F(X0)
             Returns:
@@ -684,10 +718,10 @@ class table:
             """
             Solves the system of equations JX=F(X0) for X using Cramer's rule.
             Params:
-                F: f(mvlt) = [h(mvlt)-hSet, c(mvlt)-cSet]
-                X0: [xim, xiv L, t]
+                F  = f(mvlt) = [h(mvlt)-hSet, c(mvlt)-cSet]
+                X0 =  [xim, xiv L, t]
             Returns:
-                X = [J^(-1)][F(X0)]
+                X  = [J^(-1)][F(X0)]
             """
             # Confirm X is an array
             X0 = np.array(X0)
@@ -866,9 +900,9 @@ class table:
             recreate_all:bool = if set to True, the code will re-create all tables, even if they already exist.
             
         Outputs:
-            phi_mvhc_arr: Array of phi functions phi = phi(xim, xiv, h, c)
+            phi_mvhc_arr = Array of phi functions phi = phi(xim, xiv, h, c)
                 NOTE: if only one phi is specified, if will still be returned in a single-element array.
-            tableArr: array of [table, indices] for each phi, beginning with h and c.
+            tableArr = array of [table, indices] for each phi, beginning with h and c.
 
         """
         s = self
@@ -935,7 +969,7 @@ class table:
                         if solver == 'gammachi':
                             L, t = s.Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, useStoredSolution)
                         elif solver == 'newton':
-                            L, t = s.Lt_from_hc_newton(h, c, xim, xiv, Ih, Ic, norm, detailedWarn, maxIter, 
+                            L, t = s.Lt_from_hc_newton(h, c, xim, xiv, Ih, Ic, s.norm, detailedWarn, maxIter, 
                                                        saveSolverStates, useStoredSolution, LstepParams, tstepParams)
                         else:
                             raise ValueError("Invalid solver specified. Use 'gammachi' or 'newton'.")
@@ -946,85 +980,119 @@ class table:
             return s.phi_mvhc_funcs, s.table_storage
             
         ####### Parallel computation
-        else: 
-            # Import needed packages
-            from concurrent.futures import ProcessPoolExecutor
-            import concurrent
-
-            phi = ['h', 'c'] + list(phi) # Need to create h and c tables too, so add them at the beginning. 
-            force_arr = np.full(len(phi), recreate_all)
-            table_args = [(phi[i],force_arr[i]) for i in range(len(phi))] # Arguments for each table's creation
-
+        else:
             # Parallel table creation (should be reviewed)
-            # Try to get 'fork', fall back to 'spawn'
+            # Try using 'fork', fall back to 'spawn'
             try:
                 # 'fork' is only available for Unix-like systems and is faster
                 ctx = mp.get_context('fork')
             except ValueError:
                 # 'fork' is not available, use 'spawn'. Slower, but more compatible.
                 ctx = mp.get_context('spawn')
+            
+            phi = ['h', 'c'] + list(phi) # Need to create h and c tables too, so add them at the beginning. 
+            force_arr = np.full(len(phi), recreate_all)
+            if ctx == mp.get_context('fork'):
+                # mp queueing is not needed if using fork.
+                queue = None
+            else:
+                queue = mp.Manager().Queue()
+            table_args = [(phi[i],force_arr[i], queue) for i in range(len(phi))] # Arguments for each table's creation
+            
+            sentinels_received = 0
+            sentinels_expected = len(table_args)
 
+            if s.flmt_data is None:
+                # No processed data yet generated: must generate.
+                print("Parsing flamelet data")
+                s.parse_data()
+            print()
             print("Beginning parallel table creation...")
-            with ProcessPoolExecutor(mp_context=ctx) as executor:
-                # KNOWN ISSUE: if using 'spawn' (e.g, on Windows), the parallelized table creations will not printt
-                #              their statuses. This makes it impossible to track completion of each table, which can 
-                #              be very lengthy for highly resolved tables.
-                futures = {executor.submit(s.create_table_aux, args): idx for idx, args in enumerate(table_args)}
-                results = {}
-                for future in concurrent.futures.as_completed(futures):
-                    idx = futures[future]
-                    try:
-                        results[idx] = future.result()
-                    except Exception as e:
-                        print(f"Table creation for index {idx} (phi = {phi[idx]}) generated an exception: {e}")
+            futures = []
+            try:
+                with ProcessPoolExecutor(mp_context=ctx) as executor:
+                    futures = {executor.submit(s.create_table_aux, args): idx for idx, args in enumerate(table_args)}
 
-            # Create h & c interpolators -- These should only be set to cubic interpolation with a very dense table.
-            
-            h_table, h_indices = results[0]
-            c_table, c_indices = results[1]
-            if recreate_all or 'h' not in s.mvlt_interp_storage:
-                Ih = s.create_interpolator_mvlt('h', h_table, h_indices)
-            else:
-                Ih = s.mvlt_interp_storage['h']
-            if recreate_all or 'c' not in s.mvlt_interp_storage:
-                Ic = s.create_interpolator_mvlt('c', c_table, c_indices)
-            else:
-                Ic = s.mvlt_interp_storage['c']
-            
-            # Set normalization factor
-            s.norm = np.max(np.abs(h_table))/np.max(c_table)
-            
-            # Create functions for phi(xim, xiv, h, c)
-            for i, p in enumerate(phi):
-                if recreate_all or p not in s.mvlt_interp_storage:
-                    InterpPhi = s.create_interpolator_mvlt(p, results[i][0], results[i][1])
-                else:
-                    InterpPhi = s.mvlt_interp_storage[p]
+                    while sentinels_received < sentinels_expected:
+                        try:
+                            message = queue.get_nowait()
+                            if 'SENTINEL' in message:
+                                sentinels_received += 1
+                            else:
+                                print(message, flush=True)
+                        except mp.queues.Empty:
+                            time.sleep(0.5)
+                    
+                    results = {}
+                    for future in concurrent.futures.as_completed(futures):
+                        idx = futures[future]
+                        try:
+                            results[idx] = future.result()
+                        except Exception as e:
+                            print(f"Table creation for index {idx} (phi = {phi[idx]}) generated an exception: {e}")
+
+                # Create h & c interpolators -- These should only be set to cubic interpolation with a very dense table.
                 
-                # Create function phi(xim, xiv, h, c)
-                def create_phi_table(interp_phi):
-                    def phi_table(xim, xiv, h, c, useStoredSolution = True, solver='gammachi', 
-                                  detailedWarn = False, maxIter = 100, saveSolverStates = False, 
-                                  LstepParams = [0.25, 0.01, 0.003], tstepParams = [0.25, 9.5, 0.02]):
-                        # Invert from (h, c) to (L, t), then return interpolated value.
-                        if solver == 'gammachi':
-                            L, t = s.Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, useStoredSolution)
-                        elif solver == 'newton':
-                            L, t = s.Lt_from_hc_newton(h, c, xim, xiv, Ih, Ic, norm, detailedWarn, maxIter, 
-                                                       saveSolverStates, useStoredSolution, LstepParams, tstepParams)
-                        else:
-                            raise ValueError("Invalid solver specified. Use 'gammachi' or 'newton'.")
-                        return interp_phi(xim, xiv, L, t)
-                    return phi_table
+                h_table, h_indices = results[0]
+                c_table, c_indices = results[1]
+                if recreate_all or 'h' not in s.mvlt_interp_storage:
+                    Ih = s.create_interpolator_mvlt('h', h_table, h_indices)
+                else:
+                    Ih = s.mvlt_interp_storage['h']
+                if recreate_all or 'c' not in s.mvlt_interp_storage:
+                    Ic = s.create_interpolator_mvlt('c', c_table, c_indices)
+                else:
+                    Ic = s.mvlt_interp_storage['c']
+                
+                # Set normalization factor
+                s.norm = np.max(np.abs(h_table))/np.max(c_table)
+                
+                # Create functions for phi(xim, xiv, h, c)
+                for i, p in enumerate(phi):
+                    if recreate_all or p not in s.mvlt_interp_storage:
+                        InterpPhi = s.create_interpolator_mvlt(p, results[i][0], results[i][1])
+                    else:
+                        InterpPhi = s.mvlt_interp_storage[p]
+                    
+                    # Create function phi(xim, xiv, h, c)
+                    def create_phi_table(interp_phi):
+                        def phi_table(xim, xiv, h, c, useStoredSolution = True, solver='gammachi', 
+                                    detailedWarn = False, maxIter = 100, saveSolverStates = False, 
+                                    LstepParams = [0.25, 0.01, 0.003], tstepParams = [0.25, 9.5, 0.02]):
+                            # Invert from (h, c) to (L, t), then return interpolated value.
+                            if solver == 'gammachi':
+                                L, t = s.Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, useStoredSolution)
+                            elif solver == 'newton':
+                                L, t = s.Lt_from_hc_newton(h, c, xim, xiv, Ih, Ic, s.norm, detailedWarn, maxIter, 
+                                                        saveSolverStates, useStoredSolution, LstepParams, tstepParams)
+                            else:
+                                raise ValueError("Invalid solver specified. Use 'gammachi' or 'newton'.")
+                            return interp_phi(xim, xiv, L, t)
+                        return phi_table
 
-                s.phi_mvhc_funcs[p] = create_phi_table(InterpPhi)  # Store function in the class
-            return s.phi_mvhc_funcs, s.table_storage
+                    s.phi_mvhc_funcs[p] = create_phi_table(InterpPhi)  # Store function in the class
+                return s.phi_mvhc_funcs, s.table_storage
+            except KeyboardInterrupt:
+                for future in futures:
+                    if not future.done():
+                        future.cancel()
+                print("Shutdown complete.", flush=True)
+                sys.exit(1)
         
     def save(self, name = 'table'):
         """
         Saves this instance of table to a file.
         Args:
-            name: Name of the file to save the table as. Default = 'table'.
+            name = Name of the file to save the table as. Default = 'table'.
         """
         with open(f'{name}.pkl', 'wb') as f:
             dill.dump(self, f)
+
+def load(name = 'table'):
+    """
+    Loads a table from a file.
+    Args:
+        name = Name of the file to load the table from. Default = 'table'.
+    """
+    with open(f'{name}.pkl', 'rb') as f:
+        return dill.load(f)
