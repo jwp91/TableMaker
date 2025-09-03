@@ -992,11 +992,7 @@ class table:
             
             phi = ['h', 'c'] + list(phi) # Need to create h and c tables too, so add them at the beginning. 
             force_arr = np.full(len(phi), recreate_all)
-            if ctx == mp.get_context('fork'):
-                # mp queueing is not needed if using fork.
-                queue = None
-            else:
-                queue = mp.Manager().Queue()
+            queue = mp.Manager().Queue()
             table_args = [(phi[i],force_arr[i], queue) for i in range(len(phi))] # Arguments for each table's creation
             
             sentinels_received = 0
