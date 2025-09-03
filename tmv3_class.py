@@ -127,6 +127,18 @@ class table:
         self.path_to_hsens = path_to_hsens
         self.gammaValues = gammaValues
 
+        # Get the directory of the current Python script
+        try:
+            self.current_dir = os.path.dirname(os.path.abspath(__file__))
+        except:
+            # Get the directory of the current jupyter notebook
+            self.current_dir = os.path.dirname(os.path.abspath(''))
+
+        # Create a directory for auxiliary data (solver files, etc.)
+        self.result_dir = os.path.join(self.current_dir, 'results')
+        if not os.path.exists(self.result_dir):
+            os.makedirs(self.result_dir)
+
         #---------- Create arrays of ξm and ξv
         if ximLfrac == ximGfrac:
             xims = np.linspace(0,1,nxim)      #Xim = Mean mixture fraction.
@@ -603,16 +615,9 @@ class table:
             if isinstance(L, np.ndarray):
                 L = L[0]
             return cInterp(xim, xiv, L, t) - cgoal
-        
-        # Get the directory of the current Python script
-        try:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-        except:
-            # Get the directory of the current jupyter notebook
-            current_dir = os.path.dirname(os.path.abspath(''))
 
-        # Check if previous solution was stored in the same directory
-        file_path = os.path.join(current_dir, "chiGamma_lastsolution.txt")
+        # Check if previous solution was stored
+        file_path = os.path.join(s.result_dir, "chiGamma_lastsolution.txt")
         if os.path.isfile(file_path) and useStoredSolution:
             # Use the last solution as the initial guess
             L = np.loadtxt(file_path)
@@ -628,7 +633,7 @@ class table:
         L = minimize(lambda L: np.abs(obj(L)), guess, method = 'Nelder-Mead').x[0]
         #L = minimize_scalar(lambda L: np.abs(obj(L)), guess, method = 'bounded', bounds=Lbounds).x[0]
 
-        np.savetxt("chiGamma_lastsolution.txt", np.array([L]))
+        np.savetxt(file_path, np.array([L]))
         return [L, t]
 
     def Lt_from_hc_newton(self, hgoal, cgoal, xim, xiv, hInterp, cInterp, norm, detailedWarn:bool = False, 
@@ -771,24 +776,16 @@ class table:
             return np.array([0, 0, Lchange, tchange])
         
         # Create initial guess
-        # Get the directory of the current Python script
-        try:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-        except:
-            # Get the directory of the current jupyter notebook
-            current_dir = os.path.dirname(os.path.abspath(''))
-
-        # Check if "file.txt" exists in the same directory
-        file_path = os.path.join(current_dir, "newtonsolve_lastsolution.txt")
-
         Lmin = s.Lbounds[0]+1e-6
         Lmax = s.Lbounds[1]-1e-6
         tmin = s.tbounds[0]+1e-6
         tmax = s.tbounds[1]-1e-6
         Lstart = (Lmax-Lmin)*0.25+Lmin
         tstart = (tmax-tmin)*0.9+tmin
+
+        file_path = os.path.join(s.result_dir, "newtonsolve_lastsolution.txt")
         if os.path.isfile(file_path) and useStoredSolution:
-            guess = np.loadtxt("newtonsolve_lastsolution.txt")
+            guess = np.loadtxt(file_path)
             guess[0], guess[1] = (xim, xiv)
         else:
             guess   = [xim, xiv, Lstart, tstart]
@@ -877,7 +874,7 @@ class table:
             np.savetxt(file_path, np.hstack((states[0:i], np.array([errors[0:i]]).T)))
 
         # Store solution to use as initial guess next time
-        np.savetxt("newtonsolve_lastsolution.txt", guess)
+        np.savetxt(file_path, guess)
         return [guess[2], guess[3]]
 
     def create_table_aux(self, args):
@@ -1081,14 +1078,18 @@ class table:
         Args:
             name = Name of the file to save the table as. Default = 'table'.
         """
-        with open(f'{name}.pkl', 'wb') as f:
+        path = os.path.join(self.result_dir, name+'.pkl')
+        with open(path, 'wb') as f:
             dill.dump(self, f)
+        print(f"Table saved to {path}")
 
-def load(name = 'table'):
-    """
-    Loads a table from a file.
-    Args:
-        name = Name of the file to load the table from. Default = 'table'.
-    """
-    with open(f'{name}.pkl', 'rb') as f:
-        return dill.load(f)
+    def load(self, name = 'table'):
+        """
+        Loads a table from a file.
+        Args:
+            name = Name of the file to load the table from. Default = 'table'.
+        """
+        path = os.path.join(self.result_dir, name+'.pkl')
+        with open(path, 'rb') as f:
+            return dill.load(f)
+        print(f"Table loaded from {path}")
