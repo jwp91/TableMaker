@@ -37,15 +37,15 @@ class table:
             - For the first file, this would be (0,0), for the second file (0,1), etc.
             - The code that parses this data checks a user-provided list of expected L and t indices 
               against the file names to ensure there are no mismatches.
-        These files are stored in a certain directory, the path to which is passed as an argument to the class. 
-        The class can then:
+        These files are stored in a certain directory, the path to which is passed as an argument to the 'table' object. 
+        'table' can then:
             - Parse the data files in the directory, including the creation of progress variable data based on
               the mass fractions of specified chemical components (c_components)
             - Create functions phi(ξ) for any specified property, phi
             - Create a lookup table of phi_avg(ξm, ξv, L, t) for any specified property, phi
                 - This assumes a subgrid beta-PDF distribution for the mixture fraction, ξ, 
                   parameterized by ξm (mean mixture fraction) and ξv (mixture fraction variance).
-                - The subgrid distributions of L and t are assumed to be delta functions about their means.
+                - The subgrid distributions of L and t are assumed to be delta functions about their means, independent of mixture fraction.
             - Create an interpolator for phi_avg(ξm, ξv, L, t) using RegularGridInterpolator
             - Create a function phi_avg(ξm, ξv, h, c)
                 - Solves internally for (L,t) given (h,c). This can done using either:
@@ -53,8 +53,8 @@ class table:
                     2. A 2D Newton solver.
                 - The latter is substantially slower and includes tuning parameters, but is more general. 
 
-    The class is initialized with:
-        - path to the directory containing the flamelet data files
+    'table' is initialized with:
+        - path to the directory containing the simulated flamelet data files (created using e.g., Ignis [Lignell])
         - list of L indices used in the file names
         - list of t indices used in the file names
         - regular expression to identify which files in the aforementioned path are data files
@@ -68,12 +68,15 @@ class table:
         - interpolation method for the intermediate function phi(xim, xiv, L, t)
             - Default: 'linear'
         - number of data points between bounds for both xim and xiv (mean and variance of mixture fraction, respectively)
-            - Default values: nxim = 5, nxiv = 5 (much to course, but low computational load for initial testing)
+            - Default values: nxim = 5, nxiv = 5 (much too course, but low computational load for initial testing)
         - fraction of the xim domain that should contain ximGfrac (another parameter) of the total xim points
             - Default values: ximLfrac = 0.5, ximGfrac = 0.5 (even spacing)
+            - Example: if ximLfrac = 0.2 and ximGfrac = 0.5, then 50% of the nxim points will fall in the first 20% of the domain.
         - path to a file containing columns of mixf and sensible enthalpy data (J/kg)
             - Default: './data/ChiGammaTablev3/hsens.dat'
-        - array of gamma values, implying the functional relationship between t and gamma (a continuous parameter)
+            - This is needed because the flamelet data files do not contain sensible enthalpy data, and this parameter is nonlinearly
+              related to mixture fraction.
+        - array of gamma values, implying the functional relationship between t (index) and gamma (a continuous parameter)
             For example, if tvals = [0, 1, 2, ...], gammaValues = [0, 0.05, 0.1, ...] defines the function gamma(t).
     """
     
@@ -106,7 +109,7 @@ class table:
             ximGfrac = (0 to 1), fraction of the total nxim points that should fall inside of ximLfrac of the total domain.
                 Example: if ximLfrac = 0.2 and ximGfrac = 0.5, then 50% of the nxim points will fall in the first 20% of the domain.
             path_to_hsens = path to a file containing the sensible enthalpy data (col1 = mixf, col2 = h[J/kg])
-            gammaValues = array of gamma values corresponding to the t values loaded in. 
+            gammaValues = array of gamma values (continuous) corresponding to the t values (indexed) passed in. 
                 For example, if tvals = [0, 1, 2, ...], gammaValues = [0, 0.05, 0.1, ...] would be appropriate.
         """
         self.path_to_data = path_to_data
@@ -182,7 +185,6 @@ class table:
         else:
             queue.put(message)
 
-
     def compute_progress_variable(self, data, header):
         """
         Progress variable is defined as the sum of the mass fractions of a specified set of c_components.
@@ -203,7 +205,7 @@ class table:
         # Confirm all indices were located
         for j, ind in enumerate(indices):
             if ind == -1:
-                raise ValueError(f"No match found for {self.c_components[j]}.")
+                raise ValueError(f"No match found for {self.c_components[j]} when computing progress variable.")
 
         #---------- Compute progress variable
         c = np.zeros(len(data[0]))        # Initialize c array
@@ -253,8 +255,8 @@ class table:
 
         #---------- Initialize data arrays
         flmt_data = np.empty((len(s.Lvals),len(s.tvals)), dtype=np.ndarray)  # Initialize to grab data values
-        headers  = np.empty((len(s.Lvals),len(s.tvals)), dtype=np.ndarray)  # Initialize to store headers
-        extras   = np.empty((len(s.Lvals),len(s.tvals)), dtype=np.ndarray)  # Initialize to store extra info before header
+        headers   = np.empty((len(s.Lvals),len(s.tvals)), dtype=np.ndarray)  # Initialize to store headers
+        extras    = np.empty((len(s.Lvals),len(s.tvals)), dtype=np.ndarray)  # Initialize to store extra info before header
 
         #---------- Grab and store data
         print("Parsing data files...")
@@ -279,8 +281,8 @@ class table:
                 IsHeader = True
                 header = np.array([])
                 extra = np.array([])
-                for line in reversed(lines):               #The last of the commented lines should be the headers,
-                    if line.startswith('#'):               #so we grab the last of the commented lines
+                for line in reversed(lines):               # The last of the commented lines should be the headers,
+                    if line.startswith('#'):               # so we grab the last of the commented lines
                         vals = np.array([val for val in line.strip().split() if val !='#'])
                         if IsHeader == True:
                             for val in vals:
@@ -296,7 +298,7 @@ class table:
             extras[l,t]  = extra
             
             #---------- Parse out numerical values
-            #NOTE: the following lines could be achieved with np.loadtxt(). Because we've already read in the lines
+            #NOTE: the following lines could also be achieved with np.loadtxt(). Because we've already read in the lines
             #      to extract the headers, we can extract the data manually with a few extra lines of code.
             
             file_data = np.empty(len(raw_data[0].split()))     # Holds the data for this file
@@ -562,7 +564,7 @@ class table:
         def hsensFunc(xim, xiv):
             # Returns hsens for a value of xim and xiv
             xivmax = xim*(1-xim)
-            xiv = max(0, min(xiv*xim*(1-xim), xivmax))
+            xiv = max(0, min(xiv*xim*(1-xim), xivmax)) # Forced bounding
             return interpolator([xim, xiv])
         s.hsensFunc = hsensFunc
         return s.hsensFunc
@@ -575,8 +577,9 @@ class table:
             1) an imposed heat loss parameter gamma, defined as (h_{adiabatic} - h)/h_{sensible, firstFile}
             2) a diffusive strain parameter chi, used in the opposed jet formulation of a flamelet.
         Because gamma is independent of chi, gamma may be determined first using thermodynamic data. 
+            - This data is passed in and processed using the create_hsensFunc method.
         Then, chi may be determined using interpolated data from the table. 
-        Note: chi:L :: gamma:t
+        Note: chi:L:strain :: gamma:t:heat loss
 
         Function parameters:
             hgoal = value of enthalpy
@@ -627,7 +630,7 @@ class table:
             else:
                 guess = L
         else:
-            guess   = s.Lbounds[0] + (s.Lbounds[1]-s.Lbounds[0])/2
+            guess     = s.Lbounds[0] + (s.Lbounds[1]-s.Lbounds[0])/2
 
         #L = fsolve(obj, guess)[0]
         L = minimize(lambda L: np.abs(obj(L)), guess, method = 'Nelder-Mead').x[0]
