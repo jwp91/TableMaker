@@ -23,7 +23,7 @@ Lbounds = [min(Lvals), max(Lvals)]
 tbounds = [min(tvals), max(tvals)]
 path_to_hsens = './data/ChiGammaTablev3/hsens.dat' # Col1: mixf, Col2: hsens (L = 0). 
 
-tables = tmv3c.table(path, Lvals, tvals, nxim=4, nxiv=4, ximLfrac=ximLfrac, ximGfrac=ximGfrac,
+tables = tmv3c.table(path, Lvals, tvals, nxim=nxim, nxiv=nxiv, ximLfrac=ximLfrac, ximGfrac=ximGfrac,
                      gammaValues=gammaValues, flmt_file_pattern=file_pattern)
 
 ##### Generate the table
@@ -33,4 +33,4 @@ end = time.time()
 seconds = int(end - start)
 print(f"Time elapsed creating functions: {seconds//60} minutes {seconds%60} seconds")
 
-tables.save('tabledata')
+tables.save('tables')

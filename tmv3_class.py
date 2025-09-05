@@ -1087,27 +1087,35 @@ class table:
             dill.dump(self, f)
         
         date = time.strftime("%Y%m%d")
-        np.savetxt(f"{name}_metadata.txt", 
-                [s.nxim, s.ximLfrac, s.ximGfrac, s.nxiv, len(s.tvals), len(s.Lvals), len(s.gammaValues), date],
-                header="nxim, ximLfrac, ximGfrac, nxiv, nt, nL, ngamma, date", fmt='%1.6e')
+        np.savetxt(os.path.join(self.result_dir, name+'_metadata.txt'), 
+                   [s.nxim, s.ximLfrac, s.ximGfrac, s.nxiv, len(s.tvals), len(s.Lvals), len(s.gammaValues), date],
+                header="nxim, ximLfrac, ximGfrac, nxiv, nt, nL, ngamma, date", fmt="%s")
 
         print(f"Table saved to {path}")
 
-    def load(self, name = 'table'):
-        """
-        Loads a table from a file.
-        Args:
-            name = Name of the file to load the table from. Default = 'table'.
-        """
-        path = os.path.join(self.result_dir, name+'.pkl')
-
-        # Warn if table was computed more than a month ago
-        metadata = np.loadtxt(f"{name}_metadata.txt", skiprows=1)
-        today = time.strftime("%Y%m%d")
-        if int(today) - int(metadata[7]) > 100:
-            warnings.warn(f"""Table {name} was created over a month ago (on {metadata[7]:.0f}). 
-        Ensure the table is still relevant for the desired analysis.""")
-        
-        with open(path, 'rb') as f:
-            print(f"Table loaded from {path}")
-            return dill.load(f)
+def load(name = 'table'):
+    """
+    Loads a table from a file.
+    Args:
+        name = Name of the file to load the table from. Default = 'table'.
+    """
+    # Get current directory
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+    except:
+        # Get the directory of the current jupyter notebook
+        current_dir = os.path.dirname(os.path.abspath(''))
+    result_dir = os.path.join(current_dir, 'results') 
+    
+    # Warn if table was computed more than a month ago
+    metadata = np.loadtxt(os.path.join(result_dir, name+'_metadata.txt'), skiprows=1)
+    today = time.strftime("%Y%m%d")
+    if int(today) - int(metadata[7]) > 100:
+        warnings.warn(f"""Table {name} was created over a month ago (on {metadata[7]:.0f}). 
+    Ensure the table is still relevant for the desired analysis.""")
+   
+    # Load the table
+    path = os.path.join(result_dir, name+'.pkl')
+    with open(path, 'rb') as f:
+        print(f"Table loaded from {path}")
+        return dill.load(f)

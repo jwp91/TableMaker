@@ -6,10 +6,10 @@ import tmv3_class as tmv3c
 import os
 
 # Load table
-tables = tmv3c.load('tableclassdata')
+tables = tmv3c.load('tables')
 
 # Set cases
-cases = ['tjet_Le1B_LGLE', 'tjet_Le1B_LGHE', 'tjet_Le1B_HGLE', 'tjet_Le1B_HGHE']
+cases = ['tjet_Le1B_LGLE',]
 
 # Verify functions are callable and returning reasonable values
 print("Confirm functions were generated correctly:")
@@ -68,9 +68,9 @@ def apriori(phiData, ximData, xivData, hData, cData, table, phiName = None, conf
                 else:
                     # Query the table
                     if radInd == 0 and timeInd == 0:
-                        phiQueried[radInd][timeInd] = table(xim, xiv, h, c, useStoredSolution = False, solver = 'gammaChi')
+                        phiQueried[radInd][timeInd] = table(xim, xiv, h, c, useStoredSolution = False, solver = 'gammachi')
                     else:
-                        phiQueried[radInd][timeInd] = table(xim, xiv, h, c, useStoredSolution = True, solver = 'gammaChi')
+                        phiQueried[radInd][timeInd] = table(xim, xiv, h, c, useStoredSolution = True, solver = 'gammachi')
         print(f"Finished {phiName} a priori testing.")
         return phiQueried, phiData
     
