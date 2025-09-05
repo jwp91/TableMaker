@@ -1081,9 +1081,16 @@ class table:
         Args:
             name = Name of the file to save the table as. Default = 'table'.
         """
+        s = self
         path = os.path.join(self.result_dir, name+'.pkl')
         with open(path, 'wb') as f:
             dill.dump(self, f)
+        
+        date = time.strftime("%Y%m%d")
+        np.savetxt(f"{name}_metadata.txt", 
+                [s.nxim, s.ximLfrac, s.ximGfrac, s.nxiv, len(s.tvals), len(s.Lvals), len(s.gammaValues), date],
+                header="nxim, ximLfrac, ximGfrac, nxiv, nt, nL, ngamma, date", fmt='%1.6e')
+
         print(f"Table saved to {path}")
 
     def load(self, name = 'table'):
@@ -1093,6 +1100,14 @@ class table:
             name = Name of the file to load the table from. Default = 'table'.
         """
         path = os.path.join(self.result_dir, name+'.pkl')
+
+        # Warn if table was computed more than a month ago
+        metadata = np.loadtxt(f"{name}_metadata.txt", skiprows=1)
+        today = time.strftime("%Y%m%d")
+        if int(today) - int(metadata[7]) > 100:
+            warnings.warn(f"""Table {name} was created over a month ago (on {metadata[7]:.0f}). 
+        Ensure the table is still relevant for the desired analysis.""")
+        
         with open(path, 'rb') as f:
+            print(f"Table loaded from {path}")
             return dill.load(f)
-        print(f"Table loaded from {path}")
