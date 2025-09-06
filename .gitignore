@@ -1,7 +1,7 @@
 ._*
 .ipynb_checkpoints
 .virtual_documents
-./Archive/*
-./solver_data/*
-./results/*
+Archive/
+solver_data/
+results/
 
