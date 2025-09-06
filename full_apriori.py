@@ -97,7 +97,7 @@ for caseName in cases:
     ODT_CO2vals = np.loadtxt(ODTpath + r'fmeans_y_CO2.dat')[:,1:]
 
     #################### Run a priori testing, save data
-    savePath = r'./figures/ODT_aPriori/Publication/'+caseName+'/'
+    savePath = r'./figures/ODT_aPriori/pkgTest/'+caseName+'/'
     # Check if the folder exists, and create it if it doesn't
     if not os.path.exists(savePath):
         os.makedirs(savePath)
