@@ -31,6 +31,9 @@ start = time.time()
 tables.phi_mvhc(['T', 'hr', 'CO', 'OH', 'CO2'])
 end = time.time()
 seconds = int(end - start)
-print(f"Time elapsed creating functions: {seconds//60} minutes {seconds%60} seconds")
-
+hours = seconds//3600
+minutes = (seconds - hours*3600)//60
+seconds = (seconds - hours*3600 - minutes*60)
+print(f"Time elapsed creating functions: {hours} hours, {minutes} minutes, {seconds} seconds")
+  
 tables.save('tables')

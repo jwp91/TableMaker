@@ -907,11 +907,8 @@ class table:
         """
         s = self
         # ------------ Pre-processing
-        # Confirm h and c aren't in phi
-        for p in phi:
-            if p=='h' or p=='c':
-                print("'h' and 'c' are used as table axis and so cannot be used as phi. Cancelling operation.")
-                return None
+        # Remove h and c from phi (they are table axis, and so don't need to be tabulated)
+        phi = [p for p in phi if p != 'h' and p != 'c']
 
         # Ensure array-like
         if type(phi) == type('str'):
@@ -991,19 +988,25 @@ class table:
                 ctx = mp.get_context('spawn')
             
             phi = ['h', 'c'] + list(phi) # Need to create h and c tables too, so add them at the beginning. 
-            force_arr = np.full(len(phi), recreate_all)
+            phi_tables = phi.copy()
+            if recreate_all:
+                pass
+            else:
+                # Remove phi that already exist
+                phi_tables = [p for p in phi_tables if p not in s.table_storage or p not in s.indices_storage]
+            force_arr = np.full(len(phi_tables), recreate_all)
             queue = mp.Manager().Queue()
-            table_args = [(phi[i],force_arr[i], queue) for i in range(len(phi))] # Arguments for each table's creation
+            table_args = [(phi_tables[i],force_arr[i], queue) for i in range(len(phi_tables))] # Arguments for each table's creation
             
             sentinels_received = 0
             sentinels_expected = len(table_args)
 
             if s.flmt_data is None:
                 # No processed data yet generated: must generate.
-                print("Parsing flamelet data")
+                print("Parsing flamelet data...")
                 s.parse_data()
             print()
-            print("Beginning parallel table creation...")
+            print(f"Beginning parallel table creation for phis {phi_tables}.")
             futures = []
             try:
                 with ProcessPoolExecutor(mp_context=ctx) as executor:
@@ -1025,12 +1028,16 @@ class table:
                         try:
                             results[idx] = future.result()
                         except Exception as e:
-                            print(f"Table creation for index {idx} (phi = {phi[idx]}) generated an exception: {e}")
+                            print(f"Table creation for index {idx} (phi = {phi_tables[idx]}) generated an exception: {e}")
 
+                # Redundantly store tables and indices (parallel process cannot modify class variables, apparently).
+                for i, p in enumerate(phi_tables):
+                    s.table_storage[p] = results[i][0]
+                    s.indices_storage[p] = results[i][1]
+                print("All tables created. Creating interpolators...")
                 # Create h & c interpolators -- These should only be set to cubic interpolation with a very dense table.
-                
-                h_table, h_indices = results[0]
-                c_table, c_indices = results[1]
+                h_table, h_indices = s.table_storage['h'], s.indices_storage['h']
+                c_table, c_indices = s.table_storage['c'], s.indices_storage['c']
                 if recreate_all or 'h' not in s.mvlt_interp_storage:
                     Ih = s.create_interpolator_mvlt('h', h_table, h_indices)
                 else:
@@ -1043,6 +1050,7 @@ class table:
                 # Set normalization factor
                 s.norm = np.max(np.abs(h_table))/np.max(c_table)
                 
+                print("Creating phi(xim, xiv, h, c) functions...")
                 # Create functions for phi(xim, xiv, h, c)
                 for i, p in enumerate(phi):
                     if recreate_all or p not in s.mvlt_interp_storage:
@@ -1074,7 +1082,25 @@ class table:
                         future.cancel()
                 print("Shutdown complete.", flush=True)
                 sys.exit(1)
+
+    def reset_funcs(self, reset_interps:bool = False, parallel:bool = True):
+        """
+        Resets phi_mvhc_funcs and, optionally, mvlt_interp_storage.
+        This is useful if a set of tables has been pickled using the save() method, 
+        then loaded using the load() method into a different context (for example, a different
+        machine or environment)."""
+        s = self
+        phis = list(s.phi_mvhc_funcs.keys())
+        s.phi_mvhc_funcs = {}
+        if reset_interps:
+            s.mvlt_interp_storage = {}
         
+        # Recreate funcs and interpolators
+        s.phi_mvhc(phis, parallel=parallel, recreate_all=False)
+
+        print("Recreated functions and interpolators.")
+        return None
+
     def save(self, name = 'table'):
         """
         Saves this instance of table to a file.
