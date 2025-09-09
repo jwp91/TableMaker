@@ -108,21 +108,21 @@ for caseName in cases:
                             T_func, phiName = 'T')
     np.savetxt(savePath + 'Tqueried.txt', Tqueried)
     np.savetxt(savePath + 'T_ODT.txt', ODT_Tvals)
-    hrqueried, ODT_hrs = apriori(ODT_hrvals, ODT_ximvals, ODT_xivvals, ODT_hvals, ODT_cvals, 
-                                hr_func, phiName = 'hr')
-    np.savetxt(savePath + 'hrqueried.txt', hrqueried)
-    np.savetxt(savePath + 'hr_ODT.txt', ODT_hrvals)
-    COqueried, ODT_COs = apriori(ODT_COvals, ODT_ximvals, ODT_xivvals, ODT_hvals, ODT_cvals,
-                                CO_func, phiName = 'CO')
-    np.savetxt(savePath + 'COqueried.txt', COqueried)
-    np.savetxt(savePath + 'CO_ODT.txt', ODT_COvals)
-    OHqueried, ODT_OHs = apriori(ODT_OHvals, ODT_ximvals, ODT_xivvals, ODT_hvals, ODT_cvals,
-                                OH_func, phiName = 'OH')
-    np.savetxt(savePath + 'OHqueried.txt', OHqueried)
-    np.savetxt(savePath + 'OH_ODT.txt', ODT_OHvals)
-    CO2queried, ODT_CO2s = apriori(ODT_CO2vals, ODT_ximvals, ODT_xivvals, ODT_hvals, ODT_cvals,
-                                CO2_func, phiName = 'CO2')
-    np.savetxt(savePath + 'CO2queried.txt', CO2queried)
-    np.savetxt(savePath + 'CO2_ODT.txt', ODT_CO2vals)
+    #hrqueried, ODT_hrs = apriori(ODT_hrvals, ODT_ximvals, ODT_xivvals, ODT_hvals, ODT_cvals, 
+    #                            hr_func, phiName = 'hr')
+    #np.savetxt(savePath + 'hrqueried.txt', hrqueried)
+    #np.savetxt(savePath + 'hr_ODT.txt', ODT_hrvals)
+    #COqueried, ODT_COs = apriori(ODT_COvals, ODT_ximvals, ODT_xivvals, ODT_hvals, ODT_cvals,
+    #                            CO_func, phiName = 'CO')
+    #np.savetxt(savePath + 'COqueried.txt', COqueried)
+    #np.savetxt(savePath + 'CO_ODT.txt', ODT_COvals)
+    #OHqueried, ODT_OHs = apriori(ODT_OHvals, ODT_ximvals, ODT_xivvals, ODT_hvals, ODT_cvals,
+    #                            OH_func, phiName = 'OH')
+    #np.savetxt(savePath + 'OHqueried.txt', OHqueried)
+    #np.savetxt(savePath + 'OH_ODT.txt', ODT_OHvals)
+    #CO2queried, ODT_CO2s = apriori(ODT_CO2vals, ODT_ximvals, ODT_xivvals, ODT_hvals, ODT_cvals,
+    #                            CO2_func, phiName = 'CO2')
+    #np.savetxt(savePath + 'CO2queried.txt', CO2queried)
+    #np.savetxt(savePath + 'CO2_ODT.txt', ODT_CO2vals)
 
 print("A priori testing complete.")

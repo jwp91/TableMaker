@@ -1054,7 +1054,8 @@ class table:
                 # Create functions for phi(xim, xiv, h, c)
                 for i, p in enumerate(phi):
                     if recreate_all or p not in s.mvlt_interp_storage:
-                        InterpPhi = s.create_interpolator_mvlt(p, results[i][0], results[i][1])
+                        print(f"Creating interpolator for p: {p}")
+                        InterpPhi = s.create_interpolator_mvlt(p, s.table_storage[p], s.indices_storage[p])
                     else:
                         InterpPhi = s.mvlt_interp_storage[p]
                     
@@ -1144,4 +1145,11 @@ def load(name = 'table'):
     path = os.path.join(result_dir, name+'.pkl')
     with open(path, 'rb') as f:
         print(f"Table loaded from {path}")
-        return dill.load(f)
+        loaded = dill.load(f)
+
+    loaded.result_dir = result_dir # Update the result_dir in case the table is being used on a different machine
+    loaded.current_dir = current_dir # Update the current_dir in case the table is being used on a different machine
+
+    loaded.reset_funcs(reset_interps=True) # Reset functions and interpolators to ensure they work in the new context
+
+    return loaded
