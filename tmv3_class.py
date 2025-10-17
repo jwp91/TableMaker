@@ -482,7 +482,7 @@ class table:
 
     ##############################
 
-    def create_interpolator_mvlt(self, phi, data, inds, extrapolate = True, force = False):
+    def create_interpolator_mvlt(self, phi, data, inds, force = False):
         """
         Creates an interpolator using RegularGridInterpolator (rgi).
         Inputs:
@@ -503,13 +503,11 @@ class table:
         xi_vars = inds[1] # Normalized to Xivmax
         Ls = inds[2]
         ts = inds[3]
-        
-        if extrapolate:
-            interpolator = rgi((xi_means, xi_vars, Ls, ts), data, method = s.mvlt_interpKind, bounds_error = False, fill_value=None)
-        else:
-            interpolator = rgi((xi_means, xi_vars, Ls, ts), data, method = s.mvlt_interpKind)
 
-        def func(xim, xiv, L, t):
+        interpolator = rgi((xi_means, xi_vars, Ls, ts), data, method = s.mvlt_interpKind, \
+                           bounds_error = False, fill_value=None)
+
+        def func(xim, xiv, L, t, extrapolate=True, bound = False):
             # Function returned to the user.
             """
             Interpolates for a value of phi given:
@@ -517,16 +515,31 @@ class table:
                 Xi_variance (actual value)
                 Length scale
                 Time scale
+            Parameters:
+                extrapolate: if True (default), the fucntion allows extrapolation outside of the table. 
+                    If False, the function behaves according to the 'bound' parameter.
+                bound: if False (default), the function errors when input values are outside of the table bounds.
+                    If True, the function will force the input values to be within the table bounds.
+                NOTE: xiv is never allowed to exceed [0, Xivmax], where Xivmax = Xim*(1-Xim)
             """
+            # Check xiv value
             xiv_max = xim*(1-xim)
             if xiv > xiv_max:
                 raise ValueError(f"xiv must be less than xivMax. With xim = {xim}, xiv_max = {xiv_max}. Input xiv = {xiv}")
             if xiv_max == 0:
                 if xiv != 0:
-                    print(f"Warning: xim = {xim}, meaning xiv_max = 0. xiv passed in was {xiv}, but has been overridden to xiv = 0.")
+                    print(f"Warning: xim = {xim}, meaning xiv_max = 0. xiv passed in was {xiv}, \
+but has been overridden to xiv = 0.")
                 xiv_norm = 0
             else:
                 xiv_norm = xiv/xiv_max
+                
+            # Check bounds, if relevant
+            if not extrapolate and bound:
+                # Force bounding
+                L = max(s.Lbounds[0], min(L, s.Lbounds[1]))
+                t = max(s.tbounds[0], min(t, s.tbounds[1]))
+
             try:
                 return interpolator([xim, xiv_norm, L, t])
             except Exception as e:
@@ -605,6 +618,7 @@ class table:
         ha = h0*(1-xim) + h1*xim                        # Adiabatic enthalpy    
 
         if s.hsensFunc is None:
+            print("hsensFunc not yet created. Creating now...")
             s.hsensFunc = s.create_hsensFunc(s.path_to_hsens)
         
         gamma = (ha - hgoal)/s.hsensFunc(xim, xiv)        # Heat loss parameter
@@ -959,18 +973,54 @@ class table:
                 
                 # Create function phi(xim, xiv, h, c)
                 def create_phi_table(interp_phi):
+                    # Auxiliary function to create phi_table with correct interp_phi binding
                     def phi_table(xim, xiv, h, c, useStoredSolution = True, solver='gammachi', 
-                                  detailedWarn = False, maxIter = 100, saveSolverStates = False, 
-                                  LstepParams = [0.25, 0.01, 0.003], tstepParams = [0.25, 9.5, 0.02]):
+                                extrapolate:bool = True, bound:bool = False, minVal = None, 
+                                maxIter = 100, saveSolverStates = False,
+                                LstepParams = [0.25, 0.01, 0.003], tstepParams = [0.25, 9.5, 0.02], detailedWarn = False,):
+                        """Returns phi for given xim, xiv, h, c by inverting (h,c) -> (L,t) then interpolating.
+                        Inputs:
+                            xim = mean mixture fraction
+                            xiv = mixture fraction variance
+                            h   = enthalpy
+                            c   = progress variable
+                            useStoredSolution = if set to False, the solver will not use the last solution as its initial guess. 
+                                Using the last initial guess (default) is generally good: CFD will solve cell-by-cell, and nearby
+                                cells are expected to have similar values of phi.
+                            solver = 'gammachi' (default) or 'newton'. Selects which solver to use for (h,c) -> (L,t) inversion.
+                            extrapolate: if True (default), the fucntion allows extrapolation outside of the table. 
+                                If False, the function behaves according to the 'bound' parameter.
+                            bound: if False (default), the function errors when input values are outside of the table bounds.
+                                If True, the function will force the input values to be within the table bounds.
+                            minVal: if set to a float value, the returned phi value will be no less than minVal.
+                                Useful for ensuring properties like mass fraction remain non-negative.
+                        Inputs only used for solver = 'newton':
+                            maxIter:int = sets a limit for the maximum iterations the solver should make. Default = 100
+                            saveSolverStates: bool = if set to True (not default), the solver states will be saved to a file in the folder "solver_data".
+                                Useful for analyzing solver convergence.
+                            LstepParams = array of parameters used to relax the solver
+                                LstepParams[0] = 0.25; normal max step size (% of domain)
+                                LstepParams[1] = 0.01; threshold value of L, below which the max step size is reduced to
+                                LstepParams[2] = 0.003; reduced max step size (% of domain)
+                            tstepParams = array of parameters used to relax the solver
+                                tstepParams[0] = 0.25; normal max step size (% of domain)
+                                tstepParams[1] = 9.5; threshold value of t, above which the max step size is reduced to
+                                tstepParams[2] = 0.02; reduced max step size (% of domain)
+                            detailedWarn = Only used for solver = 'newton'.
+                                If set to true, more detailed warnings will be raised when the solver does not converge.    
+                        """
                         # Invert from (h, c) to (L, t), then return interpolated value.
                         if solver == 'gammachi':
                             L, t = s.Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, useStoredSolution)
                         elif solver == 'newton':
                             L, t = s.Lt_from_hc_newton(h, c, xim, xiv, Ih, Ic, s.norm, detailedWarn, maxIter, 
-                                                       saveSolverStates, useStoredSolution, LstepParams, tstepParams)
+                                                    saveSolverStates, useStoredSolution, LstepParams, tstepParams)
                         else:
                             raise ValueError("Invalid solver specified. Use 'gammachi' or 'newton'.")
-                        return interp_phi(xim, xiv, L, t)
+                        if minVal is not None:
+                            return max(minVal, interp_phi(xim, xiv, L, t, extrapolate=extrapolate, bound=bound))
+                        return interp_phi(xim, xiv, L, t, extrapolate=extrapolate, bound=bound) 
+                    
                     return phi_table
 
                 s.phi_mvhc_funcs[p] = create_phi_table(InterpPhi)  # Store function in the class
@@ -1054,16 +1104,49 @@ class table:
                 # Create functions for phi(xim, xiv, h, c)
                 for i, p in enumerate(phi):
                     if recreate_all or p not in s.mvlt_interp_storage:
-                        print(f"Creating interpolator for p: {p}")
+                        print(f"Creating interpolator for phi = {p}")
                         InterpPhi = s.create_interpolator_mvlt(p, s.table_storage[p], s.indices_storage[p])
                     else:
                         InterpPhi = s.mvlt_interp_storage[p]
                     
                     # Create function phi(xim, xiv, h, c)
                     def create_phi_table(interp_phi):
+                        # Auxiliary function to create phi_table with correct interp_phi binding
                         def phi_table(xim, xiv, h, c, useStoredSolution = True, solver='gammachi', 
-                                    detailedWarn = False, maxIter = 100, saveSolverStates = False, 
-                                    LstepParams = [0.25, 0.01, 0.003], tstepParams = [0.25, 9.5, 0.02]):
+                                    extrapolate:bool = True, bound:bool = False, minVal = None, 
+                                    maxIter = 100, saveSolverStates = False,
+                                    LstepParams = [0.25, 0.01, 0.003], tstepParams = [0.25, 9.5, 0.02], detailedWarn = False,):
+                            """Returns phi for given xim, xiv, h, c by inverting (h,c) -> (L,t) then interpolating.
+                            Inputs:
+                                xim = mean mixture fraction
+                                xiv = mixture fraction variance
+                                h   = enthalpy
+                                c   = progress variable
+                                useStoredSolution = if set to False, the solver will not use the last solution as its initial guess. 
+                                    Using the last initial guess (default) is generally good: CFD will solve cell-by-cell, and nearby
+                                    cells are expected to have similar values of phi.
+                                solver = 'gammachi' (default) or 'newton'. Selects which solver to use for (h,c) -> (L,t) inversion.
+                                extrapolate: if True (default), the fucntion allows extrapolation outside of the table. 
+                                    If False, the function behaves according to the 'bound' parameter.
+                                bound: if False (default), the function errors when input values are outside of the table bounds.
+                                    If True, the function will force the input values to be within the table bounds.
+                                minVal: if set to a float value, the returned phi value will be no less than minVal.
+                                    Useful for ensuring properties like mass fraction remain non-negative.
+                            Inputs only used for solver = 'newton':
+                                maxIter:int = sets a limit for the maximum iterations the solver should make. Default = 100
+                                saveSolverStates: bool = if set to True (not default), the solver states will be saved to a file in the folder "solver_data".
+                                    Useful for analyzing solver convergence.
+                                LstepParams = array of parameters used to relax the solver
+                                    LstepParams[0] = 0.25; normal max step size (% of domain)
+                                    LstepParams[1] = 0.01; threshold value of L, below which the max step size is reduced to
+                                    LstepParams[2] = 0.003; reduced max step size (% of domain)
+                                tstepParams = array of parameters used to relax the solver
+                                    tstepParams[0] = 0.25; normal max step size (% of domain)
+                                    tstepParams[1] = 9.5; threshold value of t, above which the max step size is reduced to
+                                    tstepParams[2] = 0.02; reduced max step size (% of domain)
+                                detailedWarn = Only used for solver = 'newton'.
+                                    If set to true, more detailed warnings will be raised when the solver does not converge.    
+                            """
                             # Invert from (h, c) to (L, t), then return interpolated value.
                             if solver == 'gammachi':
                                 L, t = s.Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, useStoredSolution)
@@ -1072,11 +1155,16 @@ class table:
                                                         saveSolverStates, useStoredSolution, LstepParams, tstepParams)
                             else:
                                 raise ValueError("Invalid solver specified. Use 'gammachi' or 'newton'.")
-                            return interp_phi(xim, xiv, L, t)
+                            if minVal is not None:
+                                return max(minVal, interp_phi(xim, xiv, L, t, extrapolate=extrapolate, bound=bound))
+                            return interp_phi(xim, xiv, L, t, extrapolate=extrapolate, bound=bound) 
+                        
                         return phi_table
 
                     s.phi_mvhc_funcs[p] = create_phi_table(InterpPhi)  # Store function in the class
+
                 return s.phi_mvhc_funcs, s.table_storage
+            
             except KeyboardInterrupt:
                 for future in futures:
                     if not future.done():
@@ -1136,10 +1224,7 @@ def load(name = 'table'):
     
     # Warn if table was computed more than a month ago
     metadata = np.loadtxt(os.path.join(result_dir, name+'_metadata.txt'), skiprows=1)
-    today = time.strftime("%Y%m%d")
-    if int(today) - int(metadata[7]) > 100:
-        warnings.warn(f"""Table {name} was created over a month ago (on {metadata[7]:.0f}). 
-    Ensure the table is still relevant for the desired analysis.""")
+    print(f"Table {name} was created on {metadata[7]:.0f}")
    
     # Load the table
     path = os.path.join(result_dir, name+'.pkl')
