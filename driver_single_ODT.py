@@ -13,8 +13,8 @@ savePath = r'./figures/ODT_aPriori/Publication/singleRlz'
 
 if reQuery:
     # Locate data file and specify which realization to use (arbitrary choice)
-    dataPath = r'/Users/cougar/jaredporter/inferno/codes/odt/data'
-    rlzName = r'/tjet_1/data/data_00010/dmp_00020.dat'
+    dataPath = r'./data'
+    rlzName = r'/tjet_1_dat10_dmp20.dat'
 
     # Load in the table
     tables = tmv3c.load('tables')
@@ -57,11 +57,11 @@ if reQuery:
         c = SORdf['30_progVar'][i]
         # Temporarily suppress warnings
         with warnings.catch_warnings():
-            SORdf.loc[i, 'hr_queried'] =   hr_func(xim, 0, h, c, useStoredSolution = False, solver = 'gammaChi')
-            SORdf.loc[i, 'temp_queried'] =  T_func(xim, 0, h, c, useStoredSolution = False, solver = 'gammaChi', minVal = 300)
-            SORdf.loc[i, 'CO_queried'] =   CO_func(xim, 0, h, c, useStoredSolution = False, solver = 'gammaChi', minVal = 0)
-            SORdf.loc[i, 'OH_queried'] =   OH_func(xim, 0, h, c, useStoredSolution = False, solver = 'gammaChi', minVal = 0)
-            SORdf.loc[i, 'CO2_queried'] = CO2_func(xim, 0, h, c, useStoredSolution = False, solver = 'gammaChi', minVal = 0)
+            SORdf.loc[i, 'hr_queried'] =   hr_func(xim, 0, h, c, useStoredSolution = False, solver = 'gammachi')
+            SORdf.loc[i, 'temp_queried'] =  T_func(xim, 0, h, c, useStoredSolution = False, solver = 'gammachi', minVal = 300)
+            SORdf.loc[i, 'CO_queried'] =   CO_func(xim, 0, h, c, useStoredSolution = False, solver = 'gammachi', minVal = 0)
+            SORdf.loc[i, 'OH_queried'] =   OH_func(xim, 0, h, c, useStoredSolution = False, solver = 'gammachi', minVal = 0)
+            SORdf.loc[i, 'CO2_queried'] = CO2_func(xim, 0, h, c, useStoredSolution = False, solver = 'gammachi', minVal = 0)
             
         if i%30 == 0:
             print(f"Finished row {i}/{len(SORdf['2_posf'])}")
@@ -107,7 +107,7 @@ if makeFigs:
 
         plt.tight_layout()
         plt.savefig(savePath + f"{phi}_physicalspace.png", dpi = 300)
-        plt.show()
+         
 
         # Plot comparison in mixture fraction space
         plt.plot(SORdf['9_mixf'], SORdf[ODT_label], 'bo', label = "ODT")
@@ -123,7 +123,7 @@ if makeFigs:
 
         plt.tight_layout()
         plt.savefig(savePath + f"{phi}_mixfspace.png", dpi = 300)
-        plt.show()
+         
 
     # Make figures
     print("Making figures...")
