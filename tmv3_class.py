@@ -172,6 +172,7 @@ class table:
         self.table_storage = {}
         self.indices_storage = {}
         self.mvlt_interp_storage = {}
+        self.hsensTable = None
         self.hsensFunc = None
         self.phi_mvhc_funcs = {}
         self.norm = False # Used in newton solve
@@ -556,23 +557,23 @@ but has been overridden to xiv = 0.")
         s = self
         if force:
             s.force_warning()
-        elif s.hsensFunc is not None:
-            # If the hsens function already exists, return it.
-            print("hsensFunc already exists. Use 'force = True' to re-create it.")
-            return s.hsensFunc
 
-        # Parse needed data
-        hsensdata = np.loadtxt(path_to_hsens, skiprows = 1)
-        hsensFunc = interp1d(hsensdata[:,0], hsensdata[:,1], kind = 'linear') # Sensible enthalpy (J/kg) as a function of mixf
-        
         # Make hsens table: hsens(xim, xiv)
-        hsensTable = np.zeros((s.nxim, s.nxiv))
-        for i in range(s.nxim):
-            ximVal = s.xims[i]
-            for j in range(s.nxiv):
-                xivVal = s.xivs[j]*ximVal*(1-ximVal)
-                hsensTable[i,j] = LI.IntegrateForPhiBar(ximVal, xivVal, hsensFunc)
-        interpolator = rgi((s.xims, s.xivs), hsensTable, method = 'linear')  # No extrapolation
+        if force or s.hsensTable is None:
+            # Parse needed data
+            hsensdata = np.loadtxt(path_to_hsens, skiprows = 1)
+            hsensFunc = interp1d(hsensdata[:,0], hsensdata[:,1], kind = 'linear') # Sensible enthalpy (J/kg) as a function of mixf
+            hsensTable = np.zeros((s.nxim, s.nxiv))
+            for i in range(s.nxim):
+                ximVal = s.xims[i]
+                for j in range(s.nxiv):
+                    xivVal = s.xivs[j]*ximVal*(1-ximVal)
+                    hsensTable[i,j] = LI.IntegrateForPhiBar(ximVal, xivVal, hsensFunc)
+            s.hsensTable = hsensTable
+        else:
+            print("hsensTable already exists. Use 'force = True' to re-create it.")
+
+        interpolator = rgi((s.xims, s.xivs), s.hsensTable, method = 'linear')  # No extrapolation
         
         def hsensFunc(xim, xiv):
             # Returns hsens for a value of xim and xiv
@@ -618,7 +619,7 @@ but has been overridden to xiv = 0.")
         ha = h0*(1-xim) + h1*xim                        # Adiabatic enthalpy    
 
         if s.hsensFunc is None:
-            print("hsensFunc not yet created. Creating now...")
+            print("Creating hsensFunc...")
             s.hsensFunc = s.create_hsensFunc(s.path_to_hsens)
         
         gamma = (ha - hgoal)/s.hsensFunc(xim, xiv)        # Heat loss parameter
@@ -1059,32 +1060,36 @@ but has been overridden to xiv = 0.")
             print(f"Beginning parallel table creation for phis {phi_tables}.")
             futures = []
             try:
-                with ProcessPoolExecutor(mp_context=ctx) as executor:
-                    futures = {executor.submit(s.create_table_aux, args): idx for idx, args in enumerate(table_args)}
+                if len(phi_tables) == 0:
+                    print("No tables need to be created. Skipping parallel table creation.")
+                else:
+                    with ProcessPoolExecutor(mp_context=ctx) as executor:
+                        futures = {executor.submit(s.create_table_aux, args): idx for idx, args in enumerate(table_args)}
 
-                    while sentinels_received < sentinels_expected:
-                        try:
-                            message = queue.get_nowait()
-                            if 'SENTINEL' in message:
-                                sentinels_received += 1
-                            else:
-                                print(message, flush=True)
-                        except mp.queues.Empty:
-                            time.sleep(0.5)
-                    
-                    results = {}
-                    for future in concurrent.futures.as_completed(futures):
-                        idx = futures[future]
-                        try:
-                            results[idx] = future.result()
-                        except Exception as e:
-                            print(f"Table creation for index {idx} (phi = {phi_tables[idx]}) generated an exception: {e}")
+                        while sentinels_received < sentinels_expected:
+                            try:
+                                message = queue.get_nowait()
+                                if 'SENTINEL' in message:
+                                    sentinels_received += 1
+                                else:
+                                    print(message, flush=True)
+                            except mp.queues.Empty:
+                                time.sleep(0.5)
+                        
+                        results = {}
+                        for future in concurrent.futures.as_completed(futures):
+                            idx = futures[future]
+                            try:
+                                results[idx] = future.result()
+                            except Exception as e:
+                                print(f"Table creation for index {idx} (phi = {phi_tables[idx]}) generated an exception: {e}")
 
-                # Redundantly store tables and indices (parallel process cannot modify class variables, apparently).
-                for i, p in enumerate(phi_tables):
-                    s.table_storage[p] = results[i][0]
-                    s.indices_storage[p] = results[i][1]
-                print("All tables created. Creating interpolators...")
+                    # Redundantly store tables and indices (parallel process cannot modify class variables, apparently).
+                    for i, p in enumerate(phi_tables):
+                        s.table_storage[p] = results[i][0]
+                        s.indices_storage[p] = results[i][1]
+                    print("All tables created.")
+                print("Creating interpolators...")
                 # Create h & c interpolators -- These should only be set to cubic interpolation with a very dense table.
                 h_table, h_indices = s.table_storage['h'], s.indices_storage['h']
                 c_table, c_indices = s.table_storage['c'], s.indices_storage['c']
@@ -1172,22 +1177,26 @@ but has been overridden to xiv = 0.")
                 print("Shutdown complete.", flush=True)
                 sys.exit(1)
 
-    def reset_funcs(self, reset_interps:bool = False, parallel:bool = True):
+    def recompile(self, parallel:bool = False):
         """
-        Resets phi_mvhc_funcs and, optionally, mvlt_interp_storage.
-        This is useful if a set of tables has been pickled using the save() method, 
-        then loaded using the load() method into a different context (for example, a different
-        machine or environment)."""
+        Resets internal functions (i.e., non-numpy arrays) and forces them to recompile from stored data.
+        This is useful for safely loading a previously-saved table using the 'load' function.
+        
+        NOTE: running this process in parallel has caused issues in non-Jupyter envs. This should 
+        be fixable; because this method is only recompiling functions from tables that already 
+        exist, however, parallelization is not truly necessary.
+        """
         s = self
         phis = list(s.phi_mvhc_funcs.keys())
         s.phi_mvhc_funcs = {}
-        if reset_interps:
-            s.mvlt_interp_storage = {}
+        s.mvlt_interp_storage = {}
+        s.phi_funcs = {}   # NEW
+        s.hsensFunc = None # NEW
         
-        # Recreate funcs and interpolators
+        # Trigger funcs and interpolators to get recreated
         s.phi_mvhc(phis, parallel=parallel, recreate_all=False)
 
-        print("Recreated functions and interpolators.")
+        print("Functions and interpolators recompiled.")
         return None
 
     def save(self, name = 'table'):
@@ -1235,6 +1244,6 @@ def load(name = 'table'):
     loaded.result_dir = result_dir # Update the result_dir in case the table is being used on a different machine
     loaded.current_dir = current_dir # Update the current_dir in case the table is being used on a different machine
 
-    loaded.reset_funcs(reset_interps=True) # Reset functions and interpolators to ensure they work in the new context
+    loaded.recompile() # Reset functions and interpolators to ensure they work in the new context
 
     return loaded
