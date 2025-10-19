@@ -5,11 +5,15 @@ import os
 import warnings
 import tmv3_class as tmv3c
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend
 
 # Params
-reQuery = True
+reQuery = False
 makeFigs = True
-savePath = r'./figures/ODT_aPriori/Publication/singleRlz'
+savePath = r'./figures/ODT_aPriori/Publication/singleRlz/'
+if not os.path.exists(savePath):
+    os.makedirs(savePath)
 
 if reQuery:
     # Locate data file and specify which realization to use (arbitrary choice)
@@ -55,30 +59,31 @@ if reQuery:
         xim = SORdf['9_mixf'][i]
         h = SORdf['29_enth'][i]
         c = SORdf['30_progVar'][i]
+
         # Temporarily suppress warnings
         with warnings.catch_warnings():
-            SORdf.loc[i, 'hr_queried'] =   hr_func(xim, 0, h, c, useStoredSolution = False, solver = 'gammachi')
-            SORdf.loc[i, 'temp_queried'] =  T_func(xim, 0, h, c, useStoredSolution = False, solver = 'gammachi', minVal = 300)
-            SORdf.loc[i, 'CO_queried'] =   CO_func(xim, 0, h, c, useStoredSolution = False, solver = 'gammachi', minVal = 0)
-            SORdf.loc[i, 'OH_queried'] =   OH_func(xim, 0, h, c, useStoredSolution = False, solver = 'gammachi', minVal = 0)
-            SORdf.loc[i, 'CO2_queried'] = CO2_func(xim, 0, h, c, useStoredSolution = False, solver = 'gammachi', minVal = 0)
+            SORdf.loc[i, 'hr_queried'] =   hr_func(xim, 0, h, c, useStoredSolution = True, solver = 'gammachi')
+            SORdf.loc[i, 'temp_queried'] =  T_func(xim, 0, h, c, useStoredSolution = True, solver = 'gammachi', minVal = 300)
+            SORdf.loc[i, 'CO_queried'] =   CO_func(xim, 0, h, c, useStoredSolution = True, solver = 'gammachi', minVal = 0)
+            SORdf.loc[i, 'OH_queried'] =   OH_func(xim, 0, h, c, useStoredSolution = True, solver = 'gammachi', minVal = 0)
+            SORdf.loc[i, 'CO2_queried'] = CO2_func(xim, 0, h, c, useStoredSolution = True, solver = 'gammachi', minVal = 0)
             
         if i%30 == 0:
             print(f"Finished row {i}/{len(SORdf['2_posf'])}")
 
     # Save results to a new file
-    if not os.path.exists(savePath):
-        os.makedirs(savePath)
-    SORdf.to_csv(savePath + r'/singleRlz_data.csv', index = False)
+    SORdf.to_csv(savePath + r'singleRlz_data.csv', index = False)
     print("Results saved.")
 
 if makeFigs:
     # Reload data
-    SORdf = pd.read_csv(savePath + r'/singleRlz_data.csv')
+    SORdf = pd.read_csv(savePath + r'singleRlz_data.csv')
     print("Data reloaded.")
 
     # Figure maker
+    plt.rcParams.update({'font.size': 14})
     def plotSingleODT(phi='temp', ylabel = 'Temperature', units = 'K', splity = False):
+        print("Creating figures for " + phi + "...")
         # Determine column names in dataframe
         ODT_label = None
         queried_label = None
@@ -94,7 +99,7 @@ if makeFigs:
             raise ValueError(f"Queried unavailable for {phi}.")
         
         # Plot comparison in physical space
-        plt.rcParams.update({'font.size': 14})
+        plt.figure()
         plt.plot(SORdf['2_posf'], SORdf[ODT_label], 'bo', label = "ODT")
         if splity:
             plt.ylabel(f"ODT {ylabel} ({units})")
@@ -106,10 +111,11 @@ if makeFigs:
         plt.legend()
 
         plt.tight_layout()
-        plt.savefig(savePath + f"{phi}_physicalspace.png", dpi = 300)
-         
+        plt.savefig(savePath + f"{phi}_physicalspace.pdf", dpi = 300)
+        plt.close()
 
         # Plot comparison in mixture fraction space
+        plt.figure()
         plt.plot(SORdf['9_mixf'], SORdf[ODT_label], 'bo', label = "ODT")
         if splity:
             plt.ylabel(f"ODT {ylabel} ({units})")
@@ -122,9 +128,11 @@ if makeFigs:
         plt.legend()
 
         plt.tight_layout()
-        plt.savefig(savePath + f"{phi}_mixfspace.png", dpi = 300)
-         
+        plt.savefig(savePath + f"{phi}_mixfspace.pdf", dpi = 300)
 
+        plt.close()
+        return None
+        
     # Make figures
     print("Making figures...")
     plotSingleODT('temp', ylabel = 'Temperature', units = 'K')
