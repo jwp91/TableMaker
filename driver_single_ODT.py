@@ -9,16 +9,16 @@ matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 
 # Params
-reQuery = False
+reQuery = True
 makeFigs = True
-savePath = r'./figures/ODT_aPriori/Publication/singleRlz/'
+savePath = r'./figures/ODT_aPriori/Publication/singleRlz/noExtrap/'
 if not os.path.exists(savePath):
     os.makedirs(savePath)
 
 if reQuery:
     # Locate data file and specify which realization to use (arbitrary choice)
     dataPath = r'./data'
-    rlzName = r'/tjet_1_dat10_dmp20.dat'
+    rlzName = r'/tjet5_dat90_dmp28.dat'
 
     # Load in the table
     tables = tmv3c.load('tables')
@@ -62,11 +62,16 @@ if reQuery:
 
         # Temporarily suppress warnings
         with warnings.catch_warnings():
-            SORdf.loc[i, 'hr_queried'] =   hr_func(xim, 0, h, c, useStoredSolution = True, solver = 'gammachi')
-            SORdf.loc[i, 'temp_queried'] =  T_func(xim, 0, h, c, useStoredSolution = True, solver = 'gammachi', minVal = 300)
-            SORdf.loc[i, 'CO_queried'] =   CO_func(xim, 0, h, c, useStoredSolution = True, solver = 'gammachi', minVal = 0)
-            SORdf.loc[i, 'OH_queried'] =   OH_func(xim, 0, h, c, useStoredSolution = True, solver = 'gammachi', minVal = 0)
-            SORdf.loc[i, 'CO2_queried'] = CO2_func(xim, 0, h, c, useStoredSolution = True, solver = 'gammachi', minVal = 0)
+            SORdf.loc[i, 'hr_queried'] =   hr_func(xim, 0, h, c, useStoredSolution = False, 
+                                                   solver = 'gammachi', extrapolate = False, bound = True)/1000
+            SORdf.loc[i, 'temp_queried'] =  T_func(xim, 0, h, c, useStoredSolution = False, 
+                                                   solver = 'gammachi', minVal = 300, extrapolate = False, bound = True)
+            SORdf.loc[i, 'CO_queried'] =   CO_func(xim, 0, h, c, useStoredSolution = False, 
+                                                   solver = 'gammachi', minVal = 0, extrapolate = False, bound = True)
+            SORdf.loc[i, 'OH_queried'] =   OH_func(xim, 0, h, c, useStoredSolution = False, 
+                                                   solver = 'gammachi', minVal = 0, extrapolate = False, bound = True)
+            SORdf.loc[i, 'CO2_queried'] = CO2_func(xim, 0, h, c, useStoredSolution = False, 
+                                                   solver = 'gammachi', minVal = 0, extrapolate = False, bound = True)
             
         if i%30 == 0:
             print(f"Finished row {i}/{len(SORdf['2_posf'])}")

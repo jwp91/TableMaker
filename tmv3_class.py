@@ -1131,7 +1131,7 @@ but has been overridden to xiv = 0.")
                                     Using the last initial guess (default) is generally good: CFD will solve cell-by-cell, and nearby
                                     cells are expected to have similar values of phi.
                                 solver = 'gammachi' (default) or 'newton'. Selects which solver to use for (h,c) -> (L,t) inversion.
-                                extrapolate: if True (default), the fucntion allows extrapolation outside of the table. 
+                                extrapolate: if True (default), the function allows extrapolation outside of the table. 
                                     If False, the function behaves according to the 'bound' parameter.
                                 bound: if False (default), the function errors when input values are outside of the table bounds.
                                     If True, the function will force the input values to be within the table bounds.
