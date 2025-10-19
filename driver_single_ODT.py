@@ -4,9 +4,9 @@ import pandas as pd
 import os
 import warnings
 import tmv3_class as tmv3c
-import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
+import matplotlib.pyplot as plt
 
 # Params
 reQuery = False
