@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 
 # Params
 reQuery = True
-makeFigs = False
-path = r'./figures/ODT_aPriori/Publication/noExtrap/'
+makeFigs = True
+path = r'./figures/ODT_aPriori/Publication/'
 cases = ['tjet_1', 'tjet_2', 'tjet_4', 'tjet_5']
 
 if reQuery:
@@ -45,6 +45,12 @@ if reQuery:
             numRads = len(phiData)
             numTimes = len(phiData[0])
             phiQueried = np.zeros(phiData.shape)
+
+            if phiName == 'T':
+                minVal = 300.0  # K
+            else:
+                minVal = 0.0 # species mass fractions, hr
+
             for radInd in range(numRads):
                 fracCompleted = radInd/numRads*100
                 if fracCompleted%20 <= 0.1:
@@ -74,11 +80,11 @@ if reQuery:
                     else:
                         # Query the table
                         if radInd == 0 and timeInd == 0:
-                            phiQueried[radInd][timeInd] = table(xim, xiv, h, c, useStoredSolution = False, solver = 'gammachi',
-                                                                extrapolate = False, bound = True)
+                            phiQueried[radInd][timeInd] = table(xim, xiv, h, c, useStoredSolution = False, 
+                                                                minVal = minVal, solver = 'gammachi')
                         else:
-                            phiQueried[radInd][timeInd] = table(xim, xiv, h, c, useStoredSolution = True, solver = 'gammachi',
-                                                                extrapolate = False, bound = True)
+                            phiQueried[radInd][timeInd] = table(xim, xiv, h, c, useStoredSolution = True, 
+                                                                minVal = minVal, solver = 'gammachi')
             print(f"Finished {phiName} a priori testing.")
             return phiQueried, phiData
         
@@ -171,6 +177,8 @@ if makeFigs:
         if savePath is not None:
             plt.savefig(savePath + f'{case}_{phi}_sidebyside.pdf', dpi=300)
 
+        plt.close()
+
     def slices(odtdata, queried, ODT_xs, ODT_ts, lines = [0.01, 0.2, 0.4, 0.6], 
                phi = "phi", units = "units", save = False, savePath = None):
         # Get case name from savePath
@@ -196,7 +204,7 @@ if makeFigs:
         #contour2 = axs['A'].contourf(xx, tt, queried.T, 100, cmap = 'inferno', vmin=np.min(ODT), levels = levels)
         #cbar = plt.colorbar(contour2, ax=axs['A'], pad=0.1, format = ticker.FormatStrFormatter(formatString))
         #cbar.set_label(f'{phi} ({units})', rotation=270, labelpad=15)
-        zmin, zmax = np.min(odtdata), np.max(odtdata)
+        zmin, zmax = np.min(odtdata), np.max(queried)
         lines = [0.01, 0.2, 0.4, 0.6]
         for i, line in enumerate(lines):
             axs['A'].plot(ODT_xs, line * np.ones(len(ODT_xs)), '--', color = 'white')
@@ -217,6 +225,7 @@ if makeFigs:
 
         if save:
             plt.savefig(savePath + f'{case}_{phi}_slices.pdf', dpi=300)
+        plt.close()
 
     # Make figures for each case
     for case in cases:
