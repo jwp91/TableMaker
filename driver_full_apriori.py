@@ -9,9 +9,9 @@ matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 
 # Params
-reQuery = True
-makeFigs = False
-path = r'./figures/ODT_aPriori/Publication/noExtrap/'
+reQuery = False
+makeFigs = True
+path = r'./figures/ODT_aPriori/Publication/'
 cases = ['tjet_1', 'tjet_2', 'tjet_4', 'tjet_5']
 
 if reQuery:
@@ -81,12 +81,10 @@ if reQuery:
                         # Query the table
                         if radInd == 0 and timeInd == 0:
                             phiQueried[radInd][timeInd] = table(xim, xiv, h, c, useStoredSolution = False, 
-                                                                minVal = minVal, solver = 'gammachi', 
-                                                                extrapolate=False, bound=True)
+                                                                minVal = minVal, solver = 'gammachi')
                         else:
                             phiQueried[radInd][timeInd] = table(xim, xiv, h, c, useStoredSolution = True, 
-                                                                minVal = minVal, solver = 'gammachi',
-                                                                extrapolate=False, bound=True)
+                                                                minVal = minVal, solver = 'gammachi')
             print(f"Finished {phiName} a priori testing.")
             return phiQueried, phiData
         
