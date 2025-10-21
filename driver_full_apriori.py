@@ -1,12 +1,12 @@
 # Taken from tmv3c_workspace.ipynb
 
 # Boilerplate
-import numpy as np
-import tmv3_class as tmv3c
-import os
 import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
+import numpy as np
+import tmv3_class as tmv3c
+import os
 
 # Params
 reQuery = False
