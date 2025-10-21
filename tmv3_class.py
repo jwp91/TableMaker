@@ -584,7 +584,7 @@ but has been overridden to xiv = 0.")
         return s.hsensFunc
 
     def Lt_from_hc_GammaChi(self, hgoal, cgoal, xim, xiv, hInterp, cInterp,
-                            useStoredSolution:bool = True):
+                            useStoredSolution:bool = True, extrapolate:bool = True, bound:bool = False):
         """
         Solves for (L,t) given values of (h,c) in the gamma-chi formulation of the table.
         This table is constructed so that file has:
@@ -605,6 +605,10 @@ but has been overridden to xiv = 0.")
             useStoredSolution:bool = if set to False, the solver will not use the last solution as its initial guess. 
                 Using the last initial guess (default) is generally good: CFD will solve cell-by-cell, and nearby
                 cells are expected to have similar values of phi.
+            extrapolate: if True (default), the interpolator functions allow extrapolation outside of the table. 
+                If False, the functions behave according to the 'bound' parameter.
+            bound: if False (default), the interpolator functions error when input values are outside of the table bounds.
+                If True, the functions will force the input values to be within the table bounds.
                 
         Returns a tuple of form (L,t)
         This function is to be used for getting values of phi by phi(xim, xiv, [L,t](h,c))
@@ -632,7 +636,7 @@ but has been overridden to xiv = 0.")
         def obj(L):
             if isinstance(L, np.ndarray):
                 L = L[0]
-            return cInterp(xim, xiv, L, t) - cgoal
+            return cInterp(xim, xiv, L, t, extrapolate=extrapolate, bound=bound) - cgoal
 
         # Check if previous solution was stored
         file_path = os.path.join(s.result_dir, "chiGamma_lastsolution.txt")
@@ -989,7 +993,7 @@ but has been overridden to xiv = 0.")
                                 Using the last initial guess (default) is generally good: CFD will solve cell-by-cell, and nearby
                                 cells are expected to have similar values of phi.
                             solver = 'gammachi' (default) or 'newton'. Selects which solver to use for (h,c) -> (L,t) inversion.
-                            extrapolate: if True (default), the fucntion allows extrapolation outside of the table. 
+                            extrapolate: if True (default), the function allows extrapolation outside of the table. 
                                 If False, the function behaves according to the 'bound' parameter.
                             bound: if False (default), the function errors when input values are outside of the table bounds.
                                 If True, the function will force the input values to be within the table bounds.
@@ -1012,7 +1016,8 @@ but has been overridden to xiv = 0.")
                         """
                         # Invert from (h, c) to (L, t), then return interpolated value.
                         if solver == 'gammachi':
-                            L, t = s.Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, useStoredSolution)
+                            L, t = s.Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, useStoredSolution, 
+                                                            extrapolate=extrapolate, bound=bound)
                         elif solver == 'newton':
                             L, t = s.Lt_from_hc_newton(h, c, xim, xiv, Ih, Ic, s.norm, detailedWarn, maxIter, 
                                                     saveSolverStates, useStoredSolution, LstepParams, tstepParams)
@@ -1020,7 +1025,7 @@ but has been overridden to xiv = 0.")
                             raise ValueError("Invalid solver specified. Use 'gammachi' or 'newton'.")
                         if minVal is not None:
                             return max(minVal, interp_phi(xim, xiv, L, t, extrapolate=extrapolate, bound=bound))
-                        return interp_phi(xim, xiv, L, t, extrapolate=extrapolate, bound=bound) 
+                        return interp_phi(xim, xiv, L, t, extrapolate=extrapolate, bound=bound)  
                     
                     return phi_table
 
@@ -1154,7 +1159,8 @@ but has been overridden to xiv = 0.")
                             """
                             # Invert from (h, c) to (L, t), then return interpolated value.
                             if solver == 'gammachi':
-                                L, t = s.Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, useStoredSolution)
+                                L, t = s.Lt_from_hc_GammaChi(h, c, xim, xiv, Ih, Ic, useStoredSolution, 
+                                                             extrapolate=extrapolate, bound=bound)
                             elif solver == 'newton':
                                 L, t = s.Lt_from_hc_newton(h, c, xim, xiv, Ih, Ic, s.norm, detailedWarn, maxIter, 
                                                         saveSolverStates, useStoredSolution, LstepParams, tstepParams)

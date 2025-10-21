@@ -9,8 +9,8 @@ matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 
 # Params
-reQuery = True
-makeFigs = False
+reQuery = False
+makeFigs = True
 path = r'./figures/ODT_aPriori/Publication/'
 cases = ['tjet_1', 'tjet_2', 'tjet_4', 'tjet_5']
 
