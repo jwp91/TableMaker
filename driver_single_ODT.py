@@ -10,15 +10,15 @@ import matplotlib.pyplot as plt
 
 # Params
 reQuery = True
-makeFigs = True
-savePath = r'./figures/ODT_aPriori/Publication/singleRlz/'
+makeFigs = False
+savePath = r'./figures/ODT_aPriori/Publication/singleRlz/newRlz'
 if not os.path.exists(savePath):
     os.makedirs(savePath)
 
 if reQuery:
     # Locate data file and specify which realization to use (arbitrary choice)
     dataPath = r'./data'
-    rlzName = r'/tjet5_dat90_dmp28.dat'
+    rlzName = r'/tjet5_dat90_dmp12.dat'
 
     # Load in the table
     tables = tmv3c.load('tables')
