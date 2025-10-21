@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 # Params
 reQuery = True
 makeFigs = True
-savePath = r'./figures/ODT_aPriori/Publication/singleRlz/noExtrap/'
+savePath = r'./figures/ODT_aPriori/Publication/singleRlz/'
 if not os.path.exists(savePath):
     os.makedirs(savePath)
 
@@ -63,15 +63,15 @@ if reQuery:
         # Temporarily suppress warnings
         with warnings.catch_warnings():
             SORdf.loc[i, 'hr_queried'] =   hr_func(xim, 0, h, c, useStoredSolution = False, 
-                                                   solver = 'gammachi', extrapolate = False, bound = True)/1000
+                                                   solver = 'gammachi')
             SORdf.loc[i, 'temp_queried'] =  T_func(xim, 0, h, c, useStoredSolution = False, 
-                                                   solver = 'gammachi', minVal = 300, extrapolate = False, bound = True)
+                                                   solver = 'gammachi', minVal = 300)
             SORdf.loc[i, 'CO_queried'] =   CO_func(xim, 0, h, c, useStoredSolution = False, 
-                                                   solver = 'gammachi', minVal = 0, extrapolate = False, bound = True)
+                                                   solver = 'gammachi', minVal = 0)
             SORdf.loc[i, 'OH_queried'] =   OH_func(xim, 0, h, c, useStoredSolution = False, 
-                                                   solver = 'gammachi', minVal = 0, extrapolate = False, bound = True)
+                                                   solver = 'gammachi', minVal = 0)
             SORdf.loc[i, 'CO2_queried'] = CO2_func(xim, 0, h, c, useStoredSolution = False, 
-                                                   solver = 'gammachi', minVal = 0, extrapolate = False, bound = True)
+                                                   solver = 'gammachi', minVal = 0)
             
         if i%30 == 0:
             print(f"Finished row {i}/{len(SORdf['2_posf'])}")

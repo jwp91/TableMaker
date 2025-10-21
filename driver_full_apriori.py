@@ -11,7 +11,7 @@ import os
 # Params
 reQuery = False
 makeFigs = True
-path = r'./figures/ODT_aPriori/Publication/'
+path = r'./figures/ODT_aPriori/Publication/noExtrap/'
 cases = ['tjet_1', 'tjet_2', 'tjet_4', 'tjet_5']
 
 if reQuery:
